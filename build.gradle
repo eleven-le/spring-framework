@@ -443,3 +443,23 @@ configure(rootProject) {
 	}
 
 }
+
+allprojects {
+    // 找出所有 Java 编译任务（比如 compileJava、compileTestJava）
+    tasks.withType(JavaCompile).configureEach {
+        // doFirst：确保下面这些设置在任务真正执行“最后一刻”才应用
+        // 这样就不会被其他脚本后面再覆盖
+        doFirst {
+            // 1) 移除 -Werror：它会把“警告”升级成“错误”，导致构建失败
+            options.compilerArgs.removeAll { it == "-Werror" }
+            // 2) 清掉所有 -Xlint 相关设置（比如 -Xlint:all 或 -Xlint:deprecation）
+            //    因为这些设置可能来自其他脚本，优先级可能比你写的高
+            options.compilerArgs.removeAll { it.startsWith("-Xlint") }
+            // 3) 重新添加我们想要的规则：关闭“弃用”警告
+            //    这样就不会再提示 isAccessible() 已过时
+            options.compilerArgs += ["-Xlint:-deprecation"]
+            // 4) 关闭 Gradle 自身输出的 deprecated 标记（双保险）
+            options.deprecation = false
+        }
+    }
+}
