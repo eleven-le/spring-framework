@@ -229,11 +229,50 @@ public class ConfigurationClassPostProcessor implements BeanDefinitionRegistryPo
 	}
 
 	/**
+	 * <br>
+	 * <h3>架构深度解析：首席设计师的打卡与发威 👑</h3>
+	 * <p>
+	 * 这就是咱们千呼万唤始出来的<b>【元老 1】（ConfigurationClassPostProcessor，首席图纸设计师）</b>
+	 * 正式开始干活的入口！
+	 * </p>
+	 * <p>
+	 * 这段入口代码虽然不长，但每一行都透着严谨。让我们马上来拆解这位“首席设计师”
+	 * 上班打卡时的标准动作与防线：
+	 * </p>
+	 *
+	 * <br>
+	 * <hr>
+	 * <p><b>[Original Spring Documentation]</b></p>
 	 * Derive further bean definitions from the configuration classes in the registry.
 	 */
 	@Override
 	public void postProcessBeanDefinitionRegistry(BeanDefinitionRegistry registry) {
+		/*
+		 * 🛡️ 第一道防线：物理级别的“指纹打卡” (获取 Registry ID)
+		 * ---------------------------------------------------------
+		 * [原理解析] 为什么不用 registry.hashCode()，非要用 System.identityHashCode？
+		 * 因为普通的 hashCode() 方法是可以被子类重写 (Override) 的，有被伪造或碰撞的风险。
+		 * 而 System.identityHashCode 是直接根据对象在 JVM 内存里的物理地址算出来的值，绝对无法伪造！
+		 *
+		 * [车间大白话] 首席设计师说：“我认大管家只认他本人的物理肉体，绝不认什么工牌，
+		 * 坚决防止有人拿个假冒的 Registry 过来骗我干活！”
+		 */
 		int registryId = System.identityHashCode(registry);
+		/*
+		 * 🛡️ 第二/三道防线：极其严格的“防重与顺序校验”
+		 * ---------------------------------------------------------
+		 * [背景知识] 还记得咱们上一轮说的吗？ 【1号大将】是个“双面人”，既实现了 BeanDefinitionRegistryPostProcessor (新增图纸)，又继承了 BeanFactoryPostProcessor (审核图纸)。
+		 *
+		 * [防重检查] registriesPostProcessed.contains
+		 * “我今天是不是已经给这个工厂画过图纸了？” 如果画过了，立刻报错 (快速失败)。
+		 *
+		 * [顺序检查] factoriesPostProcessed.contains (高能细节)
+		 * “我今天是不是已经给这个工厂审核过图纸了？” 如果是，那更要报错！因为在 Spring 的铁律中，
+		 * “画图纸 (Registry)”必须发生在“审核图纸 (Factory)”之前。顺序反了说明系统调度出了大 Bug。
+		 *
+		 * [打卡记录] this.registriesPostProcessed.add(registryId)
+		 * 校验通过，把这个工厂的物理 ID 记在自己的小本本上，证明“我今天已经在这干过活了”。
+		 */
 		if (this.registriesPostProcessed.contains(registryId)) {
 			throw new IllegalStateException(
 					"postProcessBeanDefinitionRegistry already called on this post-processor against " + registry);
@@ -244,6 +283,18 @@ public class ConfigurationClassPostProcessor implements BeanDefinitionRegistryPo
 		}
 		this.registriesPostProcessed.add(registryId);
 
+		/*
+		 * 🚀 终极大招：开启全自动包扫描！(核心业务流)
+		 * ---------------------------------------------------------
+		 * [这是什么] 整个注解驱动体系中最、最、最核心的一行代码！前面的校验都只是前戏，
+		 * 这一行才是真正的“狂风暴雨”。
+		 *
+		 * [它要干嘛] 点进这个方法，你会看到首席设计师真正开始发威。它会把你传进来的
+		 * AppConfig.class 当作种子：
+		 * ① 看到 @ComponentScan ➡️ 顺藤摸瓜扒开包路径，把所有 @Component、@Service 全变成图纸。
+		 * ② 看到 @Bean ➡️ 把对应的方法解析成图纸。
+		 * ③ 看到 @Import ➡️ 把你导入的其他配置类也拉进来一起解析。
+		 */
 		processConfigBeanDefinitions(registry);
 	}
 
@@ -270,30 +321,73 @@ public class ConfigurationClassPostProcessor implements BeanDefinitionRegistryPo
 	}
 
 	/**
+	 * <br>
+	 * <h3>架构巅峰：注解驱动的“核反应堆” ☢️</h3>
+	 * <p>
+	 * 欢迎来到 Spring 注解驱动真正的<b>“核反应堆”</b>！<br>
+	 * 这段 {@code processConfigBeanDefinitions} 方法，就是大名鼎鼎的【元老 1】
+	 * （首席图纸设计师）的核心办公桌。你在开发中用到的 {@code @ComponentScan} 自动扫包、
+	 * {@code @Import} 导入组件、{@code @Bean} 声明方法，全部都是在这段代码里被解析并转化成底层图纸的！
+	 * </p>
+	 * <p>
+	 * 这段长代码本质上是一个<b>“查找配置类 ➡️ 解析配置类 ➡️ 注册新图纸 ➡️ 检查是否产生新配置类（循环）”</b>
+	 * 的完整生产线。它是 Spring 中最能体现“递归”与“模型化”思维的杰作。
+	 * 让我们戴上安全帽，把这个“核反应堆”分成 4 个关键工序来拆解：
+	 * </p>
+	 *
+	 * <br>
+	 * <hr>
+	 * <p><b>[Original Spring Documentation]</b></p>
+	 *
 	 * Build and validate a configuration model based on the registry of
 	 * {@link Configuration} classes.
 	 */
 	public void processConfigBeanDefinitions(BeanDefinitionRegistry registry) {
+		/*
+		 * 🕵️‍♂️ 步骤一：全厂海选“配置类候选人”
+		 * ---------------------------------------------------------
+		 * [场景带入] 工厂刚启动时，仓库 (registry) 里只有少数几个内置组件和你的主配置类
+		 * (如 AppConfig)。第一步要做的，就是把这些“总设计图”找出来。
+		 *
+		 * [原理解析] checkConfigurationClassCandidate 这个方法非常关键。它会甄别图纸：
+		 * ① 全注解配置，Full 模式：打上了 @Configuration 注解的类。
+		 * ② 轻量级配置，Lite 模式：打上了 @Component、@ComponentScan、@Import、@Bean 的类。
+		 * 只要符合条件，统统抓进 configCandidates 列表里准备解析。
+		 */
 		List<BeanDefinitionHolder> configCandidates = new ArrayList<>();
-		String[] candidateNames = registry.getBeanDefinitionNames();
+		String[] candidateNames = registry.getBeanDefinitionNames();//1.1 获取当前仓库里所有图纸的名字
 
 		for (String beanName : candidateNames) {
 			BeanDefinition beanDef = registry.getBeanDefinition(beanName);
+			//1.2 如果之前已经处理过了，就跳过（防重复解析）
 			if (beanDef.getAttribute(ConfigurationClassUtils.CONFIGURATION_CLASS_ATTRIBUTE) != null) {
 				if (logger.isDebugEnabled()) {
 					logger.debug("Bean definition has already been processed as a configuration class: " + beanDef);
 				}
 			}
+			//1.3 【核心甄别】检查它是不是一个配置类！
 			else if (ConfigurationClassUtils.checkConfigurationClassCandidate(beanDef, this.metadataReaderFactory)) {
+				//1.4 如果是，打包成 Holder，加入“候选人名单”
 				configCandidates.add(new BeanDefinitionHolder(beanDef, beanName));
 			}
 		}
 
+		//1.5 如果一个配置类都没找到，直接下班
 		// Return immediately if no @Configuration classes were found
 		if (configCandidates.isEmpty()) {
 			return;
 		}
 
+		/*
+		 * ⚖️ 步骤二：排队与组装“超级解析机”
+		 * ---------------------------------------------------------
+		 * [场景带入] 候选人找好了，接下来要讲规矩按顺序解析，并且要把解析的工具准备好。
+		 *
+		 * [原理解析] 这里实例化了 ConfigurationClassParser。这台“超级机器”接下来将负责
+		 * 读取 .class 字节码，读懂你写的 @ComponentScan 等注解，它是 Spring 注解解析的真正引擎。
+		 */
+
+		// 2.1 根据 @Order 注解排个序，决定谁先被解析
 		// Sort by previously determined @Order value, if applicable
 		configCandidates.sort((bd1, bd2) -> {
 			int i1 = ConfigurationClassUtils.getOrder(bd1.getBeanDefinition());
@@ -301,6 +395,7 @@ public class ConfigurationClassPostProcessor implements BeanDefinitionRegistryPo
 			return Integer.compare(i1, i2);
 		});
 
+		// (检测自定义的 BeanName 生成策略...)
 		// Detect any custom bean name generation strategy supplied through the enclosing application context
 		SingletonBeanRegistry sbr = null;
 		if (registry instanceof SingletonBeanRegistry) {
@@ -319,58 +414,93 @@ public class ConfigurationClassPostProcessor implements BeanDefinitionRegistryPo
 			this.environment = new StandardEnvironment();
 		}
 
+		// 2.2 组装一台超级解析机：ConfigurationClassParser
 		// Parse each @Configuration class
 		ConfigurationClassParser parser = new ConfigurationClassParser(
 				this.metadataReaderFactory, this.problemReporter, this.environment,
 				this.resourceLoader, this.componentScanBeanNameGenerator, registry);
 
+		/*
+		 * 🌪️ 步骤三：核爆核心 —— 神奇的 do-while 裂变循环
+		 * ---------------------------------------------------------
+		 * [最高机密] 这是整个方法最精妙的设计！配置类的解析不是一次性结束的，而是一个可能
+		 * 引发“无限裂变”的循环。
+		 *
+		 * [动作 A：深度解析] 机器读取 AppConfig，看到 @ComponentScan("com.demo")，
+		 * 冲进目录扫出了一个 DatabaseConfig.class (里面带了 @Bean)。
+		 * [动作 B：转化为图纸] 将 DatabaseConfig 里的 @Bean 方法正式转化为 BeanDefinition 并入库。
+		 * [动作 C：裂变侦测] 对比仓库发现图纸变多了！检查刚才扫出来的 DatabaseConfig，
+		 * 发现它也是个配置类！把它加入 candidates，再循环一次！直到扫出来的所有类都不再是
+		 * 配置类为止。这就是你可以随意嵌套配置类的底层原因。
+		 */
+
 		Set<BeanDefinitionHolder> candidates = new LinkedHashSet<>(configCandidates);
 		Set<ConfigurationClass> alreadyParsed = new HashSet<>(configCandidates.size());
 		do {
 			StartupStep processConfig = this.applicationStartup.start("spring.context.config-classes.parse");
+			// 💥 3.1 动作 A 开动解析机，深度阅读图纸 (解析 @ComponentScan, @Import, @Bean 等)
 			parser.parse(candidates);
 			parser.validate();
 
+			// 3.2 把解析出来的模型提取出来，剔除掉已经解析过的
 			Set<ConfigurationClass> configClasses = new LinkedHashSet<>(parser.getConfigurationClasses());
 			configClasses.removeAll(alreadyParsed);
 
+			// 💥 3.3 动作 B 根据解析结果，真正去创建图纸并入库！
 			// Read the model and create bean definitions based on its content
 			if (this.reader == null) {
 				this.reader = new ConfigurationClassBeanDefinitionReader(
 						registry, this.sourceExtractor, this.resourceLoader, this.environment,
 						this.importBeanNameGenerator, parser.getImportRegistry());
 			}
+			//3.4 此时，@Bean 等方法才真正变成了 BeanDefinition 塞进了仓库！
 			this.reader.loadBeanDefinitions(configClasses);
-			alreadyParsed.addAll(configClasses);
+			alreadyParsed.addAll(configClasses); // 记录已解析的类
 			processConfig.tag("classCount", () -> String.valueOf(configClasses.size())).end();
 
+			// 准备进入裂变检查，清空当前批次的候选人
 			candidates.clear();
+
+			// 💥 3.5 动作 C 裂变侦测！
+			// 如果现在的仓库图纸总数 > 解析前的图纸总数，说明刚才的解析（扫描）产生了新的图纸！
 			if (registry.getBeanDefinitionCount() > candidateNames.length) {
 				String[] newCandidateNames = registry.getBeanDefinitionNames();
 				Set<String> oldCandidateNames = new HashSet<>(Arrays.asList(candidateNames));
 				Set<String> alreadyParsedClasses = new HashSet<>();
+				// 3.6 记录已解析名称的代码
 				for (ConfigurationClass configurationClass : alreadyParsed) {
 					alreadyParsedClasses.add(configurationClass.getMetadata().getClassName());
 				}
+				// 3.7 遍历所有新增加的图纸
 				for (String candidateName : newCandidateNames) {
 					if (!oldCandidateNames.contains(candidateName)) {
 						BeanDefinition bd = registry.getBeanDefinition(candidateName);
+						//3.8 检查这些新图纸中，有没有新的配置类？
 						if (ConfigurationClassUtils.checkConfigurationClassCandidate(bd, this.metadataReaderFactory) &&
 								!alreadyParsedClasses.contains(bd.getBeanClassName())) {
+							//3.9 如果有，把它加到 candidates 里！准备进入下一次 do-while 循环！
 							candidates.add(new BeanDefinitionHolder(bd, candidateName));
 						}
 					}
 				}
-				candidateNames = newCandidateNames;
+				candidateNames = newCandidateNames; // 3.10 更新对比基准
 			}
 		}
-		while (!candidates.isEmpty());
+		while (!candidates.isEmpty()); // 3.11 只要发现了新的配置类，就继续循环解析！
 
+		/*
+		 * 🧹 步骤四：清理与收尾
+		 * ---------------------------------------------------------
+		 * 既然图纸已经裂变、解析完毕，剩下的就是打扫战场了。
+		 */
+
+		// 4.1 把 ImportRegistry 作为一个单例 Bean 注册进容器，供将来解析 ImportAware 接口时使用
 		// Register the ImportRegistry as a bean in order to support ImportAware @Configuration classes
 		if (sbr != null && !sbr.containsSingleton(IMPORT_REGISTRY_BEAN_NAME)) {
 			sbr.registerSingleton(IMPORT_REGISTRY_BEAN_NAME, parser.getImportRegistry());
 		}
 
+		// 4.2 清除工厂里缓存的类元数据（因为解析工作已经做完，留着只会白占内存）
 		if (this.metadataReaderFactory instanceof CachingMetadataReaderFactory) {
 			// Clear cache in externally provided MetadataReaderFactory; this is a no-op
 			// for a shared cache since it'll be cleared by the ApplicationContext.

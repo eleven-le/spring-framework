@@ -203,17 +203,75 @@ public class DefaultListableBeanFactory extends AbstractAutowireCapableBeanFacto
 
 
 	/**
+	 * <br>
+	 * <h3>架构深度解析：内存泄漏防御与 WeakReference (弱引用) 🛡️</h3>
+	 * <p>
+	 * 看似只是简单地给工厂赋个 ID 值，但它里面却藏着一个 Java 高级开发/架构师面试中
+	 * 极其高频的硬核知识点——<b>静态集合的内存泄漏防御</b>与 <b>WeakReference (弱引用)</b>。
+	 * </p>
+	 * <p>
+	 * 让我们继续用“工厂登记”的比喻，来拆解这段教科书级别的防御性源码：
+	 * </p>
+	 *
+	 * <br>
+	 * <hr>
+	 * <p><b>[Original Spring Documentation]</b></p>
 	 * Specify an id for serialization purposes, allowing this BeanFactory to be
 	 * deserialized from this id back into the BeanFactory object, if needed.
 	 */
 	public void setSerializationId(@Nullable String serializationId) {
+		/*
+		 * 1. 全局黄页登记 (注册到静态集合)
+		 * ---------------------------------------------------------
+		 * [原理解析] serializableFactories 是一个 static 的全局 ConcurrentHashMap。
+		 *
+		 * [车间大白话] 这就像是国家工商总局维护的一本“全国超级工厂黄页”。大管家拿到
+		 * 序列化 ID (营业执照号) 后，第一件事就是去黄页上登记：“大家好，如果有人通过网络
+		 * 反序列化找我，请到这里来提货。”
+		 */
+
+		/*
+		 * 🌟 2. 核心高光时刻：为什么要套一层 WeakReference？
+		 * ---------------------------------------------------------
+		 * [灵魂拷问] 为什么不直接 serializableFactories.put(id, this)？
+		 *
+		 * [致命危机 OOM] 如果直接存，因为 Map 是 static 的（生命周期和整个 JVM 虚拟机一样长），
+		 * 这意味着静态 Map 将持有大管家的强引用 (Strong Reference)。哪怕有一天 Spring 容器
+		 * 被关闭，业务不需要该工厂了，垃圾回收器 (GC) 也绝对不敢回收大管家及其仓库里成千上万
+		 * 的单例 Bean！这会导致极其严重的内存泄漏。
+		 *
+		 * [弱引用的魔法] WeakReference 就像是一张“临时暂住证”。它告诉 GC：“虽然我在 Map 里
+		 * 记下了这个工厂，但如果除了我之外，系统里没有别人在使用它了，你随时可以把它当垃圾
+		 * 回收掉，不用管我！” 这样一来，既实现了全局统一登记，又完美避开了静态集合带来的内存泄漏风险。
+		 */
 		if (serializationId != null) {
 			serializableFactories.put(serializationId, new WeakReference<>(this));
 		}
+
+		/*
+		 * 3. 吊销营业执照 (主动清理机制)
+		 * ---------------------------------------------------------
+		 * [原理解析] 如果传入的 serializationId 是 null，但工厂以前登记过。
+		 * [车间大白话] 相当于工厂要注销或者改组了。大管家会主动去工商总局的黄页上，
+		 * 把自己的那条记录删掉 (remove)，保持全局注册表的干净整洁。
+		 */
 		else if (this.serializationId != null) {
 			serializableFactories.remove(this.serializationId);
 		}
+		/*
+		 * 4. 盖章生效 (赋值成员变量)
+		 * ---------------------------------------------------------
+		 * 最后一步，把传进来的 ID 真正赋值给工厂内部的成员变量，完成登记，盖章生效。
+		 */
 		this.serializationId = serializationId;
+
+		/*
+		 * 🎉 [底层功力总结]
+		 * ---------------------------------------------------------
+		 * 简简单单的一个 ID 赋值操作，背后不仅考虑了跨网络的序列化找回机制，还用
+		 * WeakReference 优雅地化解了静态集合的内存泄漏危机。Spring 源码之所以健壮，
+		 * 正是由无数个这样严谨的细节堆砌出来的。
+		 */
 	}
 
 	/**

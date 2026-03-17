@@ -1,13 +1,10 @@
-package org.springframework.lab;
+package org.springframework.lab.beandefinition;
 
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.Configuration;
 
-/**
- * 练兵场配置类
- */
 @Configuration
-@ComponentScan("org.springframework.lab")
-public class LabConfig {
+@ComponentScan("org.springframework.lab.beandefinition")
+public class BdLabConfig {
 
 }

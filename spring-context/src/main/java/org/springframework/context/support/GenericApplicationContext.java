@@ -275,17 +275,66 @@ public class GenericApplicationContext extends AbstractApplicationContext implem
 	//---------------------------------------------------------------------
 
 	/**
+	 * <br>
+	 * <h3>架构深度解析：现代注解派的防重复刷新机制 🛡️</h3>
+	 * <p>
+	 * 这段代码揭开了<b>“现代注解派（{@link GenericApplicationContext}）”</b>防重复刷新机制的真面目。
+	 * 它完美地印证了我们在云原生时代的架构理念：“工厂是一次性的，绝不回头！”
+	 * 让我们用<b>“并发编程”</b>和<b>“架构设计”</b>的双重視角，把这两行代码彻底嚼碎：
+	 * </p>
+	 *
+	 * <br>
+	 * <hr>
+	 * <p><b>[Original Spring Documentation]</b></p>
 	 * Do nothing: We hold a single internal BeanFactory and rely on callers
 	 * to register beans through our public methods (or the BeanFactory's).
 	 * @see #registerBeanDefinition
 	 */
 	@Override
 	protected final void refreshBeanFactory() throws IllegalStateException {
+		/*
+		 * 🎬 1. 并发编程的艺术：CAS 无锁机制
+		 * ---------------------------------------------------------
+		 * [原理解析] this.refreshed 是一个 AtomicBoolean（原子布尔变量），初始值是 false。
+		 * compareAndSet(false, true) 是 Java 并发包 (J.U.C) 里极其经典的 CAS
+		 * (Compare-And-Swap，比较并交换) 操作，其底层是一条 CPU 硬件级别的原子指令，性能极高。
+		 *
+		 * [车间大白话] 这就好比工厂大门上的“一次性防伪封条”。主线程试图启动工厂时，先检查封条
+		 * 是否完好 (false)。如果是，瞬间撕毁封条 (变 true) 并大摇大摆走进去。如果有不懂事的
+		 * 其他线程也跑来调 refresh()，一看封条已被撕毁 (CAS 返回 false)，加上前面的 ! 取反，
+		 * 就会立刻触发下方的异常报错。
+		 *
+		 * 🚨 [架构铁腕] Fail-Fast (快速失败)
+		 * ---------------------------------------------------------
+		 * 抛出 IllegalStateException 就是 Spring 明确的架构宣言。翻译过来就是：
+		 * “咱们这个现代化的新工厂不支持反复折腾！refresh 只能调一次，若想重载配置，请把整个工厂
+		 * 炸了重新 new 一个！” 这种快速失败设计，能在系统启动的最早期暴露出非法的调用逻辑，
+		 * 避免带着错误的状态在后面积累出更大的灾难。
+		 */
 		if (!this.refreshed.compareAndSet(false, true)) {
 			throw new IllegalStateException(
 					"GenericApplicationContext does not support multiple refresh attempts: just call 'refresh' once");
 		}
+
+		/*
+		 * 🎬 2. 给仓库发营业执照：设置序列化 ID
+		 * ---------------------------------------------------------
+		 * [原理解析] 最后这一行，是给底层的大管家 (DefaultListableBeanFactory)
+		 * 发一个全局唯一的身份证号 (Serialization ID)。
+		 *
+		 * [设计意图] 虽然在微服务中少见，但在早期的 Java EE 场景或某些分布式集群环境中，
+		 * Spring 的上下文可能被“序列化 (Serialization)”存入磁盘或通过网络传输。
+		 * 有了这个唯一 ID，在反序列化时，Spring 就能精准认出这是哪个工厂，从而恢复状态。
+		 */
 		this.beanFactory.setSerializationId(getId());
+
+		/*
+		 * 🎉 [第 2 步收官总结]
+		 * ---------------------------------------------------------
+		 * 至此，refresh() 十二步中的第 2 步 obtainFreshBeanFactory() 已经向你交出了所有底牌。
+		 * * 大管家（BeanFactory）不仅已经被安全地取了出来，还被贴上了“不可重复触碰”的防伪封条，
+		 * 拿到了合法的营业执照。现在的它，正摩拳擦掌，准备迎接接下来的狂风暴雨！
+		 */
 	}
 
 	@Override

@@ -166,20 +166,65 @@ class ConfigurationClassParser {
 	}
 
 
+	/**
+	 * <br>
+	 * <h3>架构巅峰：智能分发调度台与 Spring Boot 的心脏 🎛️</h3>
+	 * <p>
+	 * 如果说 {@code ConfigurationClassParser} 是一台极其复杂的超大型机器，那么这段代码，
+	 * 就是这台机器的<b>“智能分发流水线（调度台）”</b>。
+	 * </p>
+	 * <p>
+	 * 它本身不干具体的脏活，核心职责是：识别进来的图纸到底是什么“材质”，然后分发给下面对应
+	 * 的专用处理车间，并在最后呼叫一位“神秘大咖”出场。
+	 * </p>
+	 */
 	public void parse(Set<BeanDefinitionHolder> configCandidates) {
+		/*
+		 * 🎯 步骤一：履带启动，逐个甄别 (for 循环)
+		 * ---------------------------------------------------------
+		 * [车间大白话] 上一道工序 (海选) 把那些贴着 @Configuration、@Component 的图纸都装在
+		 * configCandidates 这个筐里送过来了。现在，分发台的机械臂把筐里的图纸一张张拿出来，准备深度解析。
+		 */
 		for (BeanDefinitionHolder holder : configCandidates) {
 			BeanDefinition bd = holder.getBeanDefinition();
+			/*
+			 * 🔀 步骤二：智能材质识别 (核心 if-else 分发逻辑)
+			 * ---------------------------------------------------------
+			 * [原理解析] Spring 的 BeanDefinition (图纸) 有很多实现类，来源不同，长得也不一样。
+			 * 这里就是根据图纸的“材质”，调用底层真正干活的重载 parse() 方法。
+			 */
 			try {
+				/*
+				 * [材质 1：纯注解图纸] AnnotatedBeanDefinition (最常见！)
+				 * 如果你是用 AnnotationConfigApplicationContext 纯注解启动，传入的 AppConfig.class 或者被包扫描扫出来的类，绝大多数都是 AnnotatedBeanDefinition 这种材质。
+				 * 👉 好处：此时提取出它的元数据 (Metadata) 去解析，还不需要把类真正加载进  JVM 内存，避免了类加载过早引发的各种玄学 Bug，极其轻量！
+				 */
 				if (bd instanceof AnnotatedBeanDefinition) {
 					parse(((AnnotatedBeanDefinition) bd).getMetadata(), holder.getBeanName());
 				}
+				/*
+				 * [材质 2：已经加载了 Class 对象的传统图纸] AbstractBeanDefinition
+				 * 如果图纸是硬编码 new 出来的，或者通过老旧 XML 转换来的，且它的 Class 对象
+				 * 已经存在了内存中，就直接把 Class 对象传给底层的 parse。
+				 */
 				else if (bd instanceof AbstractBeanDefinition && ((AbstractBeanDefinition) bd).hasBeanClass()) {
 					parse(((AbstractBeanDefinition) bd).getBeanClass(), holder.getBeanName());
 				}
+				/*
+				 * [材质 3：极其骨感的字符串图纸]
+				 * 如果连 Class 对象都没有，只知道一个类名字符串 (如 "com.demo.AppConfig")，
+				 * 那就传字符串到底层，底层车间会用反射去获取。
+				 */
 				else {
 					parse(bd.getBeanClassName(), holder.getBeanName());
 				}
 			}
+			/*
+			 * 🛡️ 步骤三：严密的异常捕获 (Fail-Fast 机制)
+			 * ---------------------------------------------------------
+			 * [车间大白话] 如果在深度解析某张图纸时发生致命错误（如类找不到、注解自相矛盾），
+			 * 立刻拉响防空警报抛出异常，停止整个工厂的启动，绝不带着残缺的图纸强行开工。
+			 */
 			catch (BeanDefinitionStoreException ex) {
 				throw ex;
 			}
@@ -189,6 +234,20 @@ class ConfigurationClassParser {
 			}
 		}
 
+		/*
+		 * 👑 终极 Boss 登场：处理延迟导入 (Spring Boot 自动装配的基石！)
+		 * ---------------------------------------------------------
+		 * [原理解析] 当上面的 for 循环结束，所有的用户自定义配置类都解析完之后，偷偷执行了这行极其伟大的代码。
+		 * deferred 的意思是“延迟的”。在解析配置类时，如果遇到实现了 DeferredImportSelector 接口的类，
+		 * Spring 不会立刻解析，而是暂存起来。等所有正常的业务配置类解析完毕后，最后集中处理它们。
+		 *
+		 *  [高频面试点] 为什么这是 Spring Boot 的心脏？
+		 * Spring Boot 的 @EnableAutoConfiguration 底层注册的正是 DeferredImportSelector 的实现类！<br>
+		 * 为什么要延迟？因为 Spring Boot 讲究“用户自定义优先”。它必须先把上面 for 循环里你写的代码
+		 * 全解析完，看看你有没有自己配置 DataSource 或 RedisTemplate。看完之后，最后再执行这行代码
+		 * (引入默认的自动装配)。如果发现你已经配了，它就不加载默认的了。这就是 @ConditionalOnMissingBean
+		 * 能够完美生效的底层物理前提！
+		 */
 		this.deferredImportSelectorHandler.process();
 	}
 
@@ -202,7 +261,14 @@ class ConfigurationClassParser {
 		processConfigurationClass(new ConfigurationClass(clazz, beanName), DEFAULT_EXCLUSION_FILTER);
 	}
 
+	/**
+	 * 📝 工序一：前台接待与包装 (包裹器)
+	 *
+	 * 车间大白话：原材料（metadata）送到门口，前台小妹用一个标准的统一档案袋（ConfigurationClass）把它装起来，并在封面上写上名字（beanName）。以后在整个解析车间里，大家只认这个标准档案袋。
+	 */
 	protected final void parse(AnnotationMetadata metadata, String beanName) throws IOException {
+		// 把原材料(metadata)和名字(beanName)包装成标准的“配置类档案袋”(ConfigurationClass)
+		// 然后送进主力车间(processConfigurationClass)，并附带一个默认的排除过滤器(DEFAULT_EXCLUSION_FILTER)
 		processConfigurationClass(new ConfigurationClass(metadata, beanName), DEFAULT_EXCLUSION_FILTER);
 	}
 
@@ -222,10 +288,26 @@ class ConfigurationClassParser {
 
 
 	protected void processConfigurationClass(ConfigurationClass configClass, Predicate<String> filter) throws IOException {
+		/*
+		 * 🛑 工序二：残酷的“一票否决”安检门
+		 *
+		 * 原理解析：又是我们熟悉的老朋友 @Conditional！
+		 * 车间大白话：档案袋送进车间，第一道关卡就是安检。安检员看看图纸上有没有写诸如“只有当引入了 MySQL 驱动时才解析”的条件。
+		 * 如果条件不满足，直接把档案袋扔进废纸篓（return），后面的工序全部省了。这也是 Spring Boot 大幅提升启动速度的核心防线。
+		 */
 		if (this.conditionEvaluator.shouldSkip(configClass.getMetadata(), ConfigurationPhase.PARSE_CONFIGURATION)) {
 			return;
 		}
 
+		/*
+		 * 🗄️ 工序三：极其烧脑的“档案室查重机制”
+		 *
+		 * 原理解析：因为配置类是可以互相引用的，系统极有可能在不同的地方多次扫到同一个配置类。Spring 在这里定下了极其严格的**“主权优先级”**规则！
+		 * 车间大白话（查重冲突解决）：
+管理员在档案柜（configurationClasses）里发现：“哎？这个 DatabaseConfig 我们之前好像解析过了！”
+你是被别人“推荐（Import）”来的？ 如果你这次是被别人 @Import 进来的，但档案室里已经有一份原来别人直接手动注册（显式）的档案了。对不起，手动注册的优先级永远最高！ 你的推荐信作废，直接 return。
+你是“亲自登门（显式）”的？ 如果你这次是光明正大通过扫描或者手动注册进来的，而档案室里那份是以前被别人“推荐”进来的。好家伙，正主来了！管理员会立刻把以前那份推荐的档案撕掉（remove），换上你这份最权威的！
+		 */
 		ConfigurationClass existingClass = this.configurationClasses.get(configClass);
 		if (existingClass != null) {
 			if (configClass.isImported()) {
@@ -233,7 +315,7 @@ class ConfigurationClassParser {
 					existingClass.mergeImportedBy(configClass);
 				}
 				// Otherwise ignore new imported config class; existing non-imported class overrides it.
-				return;
+				return; // 别人显式注册的优先级更高，忽略当前被导入的
 			}
 			else {
 				// Explicit bean definition found, probably replacing an import.
