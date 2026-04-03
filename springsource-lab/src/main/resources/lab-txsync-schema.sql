@@ -1,0 +1,10 @@
+CREATE TABLE IF NOT EXISTS orders (
+    id VARCHAR(64) PRIMARY KEY,
+    status VARCHAR(32) NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS audit_log (
+    id IDENTITY PRIMARY KEY,
+    order_id VARCHAR(64),
+    action VARCHAR(64)
+);

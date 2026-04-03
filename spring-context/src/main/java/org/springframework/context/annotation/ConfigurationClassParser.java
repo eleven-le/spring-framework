@@ -86,6 +86,87 @@ import org.springframework.util.MultiValueMap;
 import org.springframework.util.StringUtils;
 
 /**
+ * <h1>🗺️ 一、架构坐标·全局定位</h1>
+ * <h2>ConfigurationClassPostProcessor 的"解析引擎"——递归拆解配置类的核心递归器！</h2>
+ * <ul>
+ * <li><b>全限定名</b>：{@code org.springframework.context.annotation.ConfigurationClassParser}</li>
+ * <li><b>中文名</b>：配置类解析器 —— 递归解析 @Configuration 的"拆弹专家"</li>
+ * <li><b>所属车间 🏭</b>：{@code spring-context} 模块的 annotation 包（注意！annotation 包 = 注解驱动编程模型的大本营！
+ * 本类是 ConfigurationClassPostProcessor 的"内核引擎"——CCPP 负责调度，本类负责<b>真正的解析逻辑</b>。
+ * 一句话：<b>CCPP 是指挥官，本类是冲在前线的突击队长！</b>）</li>
+ * <li><b>类性质</b>：包级可见（非 public），是框架内部的核心实现类</li>
+ * </ul>
+ *
+ * <h3>💡 为什么需要单独的 Parser？——"解析"和"注册"必须分离！</h3>
+ * <p>配置类的处理分为两个阶段：</p>
+ * <ol>
+ * <li><b>解析阶段（本类负责）</b>：递归扫描配置类上的所有注解（@ComponentScan、@Import、@Bean、@PropertySource、
+ * @ImportResource），构建出 {@link ConfigurationClass} 模型对象集合</li>
+ * <li><b>注册阶段（ConfigurationClassBeanDefinitionReader 负责）</b>：把解析出的模型对象转换为 BeanDefinition 并注册到容器</li>
+ * </ol>
+ * <p>这种分离的好处：解析逻辑可以独立测试和演化，不会和 BD 注册逻辑纠缠在一起。</p>
+ *
+ * <h3>🧬 递归解析的主线——doProcessConfigurationClass() 的 8 步拆解</h3>
+ * <pre>
+ * parse(configCandidates)                                    ← 入口：遍历所有候选配置类
+ *   └── processConfigurationClass(configClass)               ← 单个配置类处理（含 @Conditional 检查）
+ *         └── doProcessConfigurationClass(sourceClass)       ← 核心递归方法，8 步拆解：
+ *               ├── ① 处理 @Component 的内部类（递归解析成员类）
+ *               ├── ② 处理 @PropertySource（加载外部属性文件到 Environment）
+ *               ├── ③ 处理 @ComponentScan（立即触发扫描！扫到的类如果是配置类，递归解析）
+ *               ├── ④ 处理 @Import（三种类型分流：ImportSelector / ImportBeanDefinitionRegistrar / 普通类）
+ *               │     ├── ImportSelector → 调 selectImports() → 递归处理返回的类名
+ *               │     ├── DeferredImportSelector → 延迟到所有配置类解析完毕后再处理（Spring Boot 的核心！）
+ *               │     ├── ImportBeanDefinitionRegistrar → 记录下来，延迟到注册阶段调用
+ *               │     └── 普通类 → 当作配置类递归解析
+ *               ├── ⑤ 处理 @ImportResource（记录 XML 资源路径，延迟到注册阶段加载）
+ *               ├── ⑥ 处理 @Bean 方法（收集所有 @Bean 方法，封装为 BeanMethod 对象）
+ *               ├── ⑦ 处理接口默认方法上的 @Bean（Java 8+ 特性）
+ *               └── ⑧ 处理父类（如果有父类且不是 java.* 开头，递归回到步骤 ①）
+ * </pre>
+ *
+ * <h3>🧬 设计精髓——你的业务能偷师什么？</h3>
+ * <ol>
+ * <li><b>ASM 读取代替反射——不加载类就能解析注解</b><br/>
+ * 本类使用 ASM 字节码读取技术（通过 MetadataReader）解析 .class 文件中的注解信息，
+ * <b>不需要把类加载到 JVM</b>。这避免了类加载的副作用（静态代码块执行、ClassNotFoundException 等），
+ * 大幅提升了解析性能和安全性。<br/>
+ * <b>业务借鉴</b>：当你需要扫描大量类做元数据分析时（如 API 文档生成、注解统计），
+ * 考虑用 ASM/Javassist 等字节码工具代替反射，避免不必要的类加载。</li>
+ *
+ * <li><b>DeferredImportSelector——"延迟处理"的精妙设计</b><br/>
+ * 普通 ImportSelector 立即执行，但 DeferredImportSelector 会被收集起来，
+ * 等<b>所有配置类都解析完毕</b>后才执行。<br/>
+ * Spring Boot 的自动配置（@EnableAutoConfiguration → AutoConfigurationImportSelector）
+ * 就是 DeferredImportSelector——它必须等用户自定义的 Bean 都注册完，
+ * 才能判断哪些自动配置该生效（@ConditionalOnMissingBean 依赖此时序）。<br/>
+ * <b>业务借鉴</b>：当你的插件系统需要"先加载用户配置，再决定哪些默认配置生效"时，
+ * 可以借鉴这种"延迟处理"机制。</li>
+ *
+ * <li><b>@ComponentScan 的特殊性——"立即执行"而非延迟</b><br/>
+ * 在 8 步中，只有 @ComponentScan 是<b>立即触发扫描并注册 BD</b>的（步骤 ③）。
+ * 因为扫描出来的类可能本身就是配置类，需要立即递归解析。
+ * 而 @Bean/@ImportResource 等都是"记录下来，延迟到注册阶段处理"。</li>
+ * </ol>
+ *
+ * <h3>🧬 与 CCPP 的协作关系</h3>
+ * <pre>
+ * ConfigurationClassPostProcessor（指挥官）
+ *   ├── 持有 ConfigurationClassParser（突击队长） ← 👈 你在这里！
+ *   │     └── 负责解析：配置类 → ConfigurationClass 模型
+ *   └── 持有 ConfigurationClassBeanDefinitionReader（后勤官）
+ *         └── 负责注册：ConfigurationClass 模型 → BeanDefinition → Registry
+ * </pre>
+ *
+ * <h3>🎯 三、战略复盘</h3>
+ * <p>ConfigurationClassParser 的核心价值：<b>递归解析配置类上的所有注解
+ * （@ComponentScan/@Import/@Bean/@PropertySource/@ImportResource），
+ * 构建出完整的 ConfigurationClass 模型</b>。<br/>
+ * 它是 Spring 注解驱动的"解析引擎"——用 ASM 高效读取注解、用递归处理配置类嵌套、
+ * 用 DeferredImportSelector 支持延迟处理。掌握了 doProcessConfigurationClass 的 8 步，
+ * 就理解了 Spring 如何把一个 @Configuration 类"展开"成一棵完整的 Bean 定义树。</p>
+ *
+ * <hr/>
  * Parses a {@link Configuration} class definition, populating a collection of
  * {@link ConfigurationClass} objects (parsing a single Configuration class may result in
  * any number of ConfigurationClass objects because one Configuration class may import
@@ -262,13 +343,26 @@ class ConfigurationClassParser {
 	}
 
 	/**
-	 * 📝 工序一：前台接待与包装 (包裹器)
-	 *
-	 * 车间大白话：原材料（metadata）送到门口，前台小妹用一个标准的统一档案袋（ConfigurationClass）把它装起来，并在封面上写上名字（beanName）。以后在整个解析车间里，大家只认这个标准档案袋。
+	 * <h3>架构巅峰：图纸安检与档案室查重 🗄️</h3>
+	 * <p>
+	 * 这个方法的核心使命只有一个：<b>“把一张候选的图纸，经过严格的安检、查重、深层扫描后，
+	 * 确认为一张合格的正式配置图纸。”</b>
+	 * </p>
+	 * <p>
+	 * 让我们把这两段代码切分成 5 个极其严密的工序，逐段对应讲解：
+	 * </p>
 	 */
 	protected final void parse(AnnotationMetadata metadata, String beanName) throws IOException {
-		// 把原材料(metadata)和名字(beanName)包装成标准的“配置类档案袋”(ConfigurationClass)
-		// 然后送进主力车间(processConfigurationClass)，并附带一个默认的排除过滤器(DEFAULT_EXCLUSION_FILTER)
+		/*
+		 * 📦 工序一：前台接待与“档案袋”封装
+		 * ---------------------------------------------------------
+		 * [原理解析] 这是进入车间前的小动作。Spring 不喜欢零散地传递参数，所以它把类的元数据
+		 * (里面包含了这个类身上的所有注解信息) 和类的名字，统一塞进了一个叫 ConfigurationClass 的对象里。
+		 *
+		 * [车间大白话] 你可以把它当成一个标准的“档案袋”。把原材料和名字装好，然后送进主力车间
+		 * (processConfigurationClass)，并附带一个默认的排除过滤器。
+		 * 后续所有的查重、解析、盖章，都是针对这个档案袋来进行的。
+		 */
 		processConfigurationClass(new ConfigurationClass(metadata, beanName), DEFAULT_EXCLUSION_FILTER);
 	}
 
@@ -289,35 +383,52 @@ class ConfigurationClassParser {
 
 	protected void processConfigurationClass(ConfigurationClass configClass, Predicate<String> filter) throws IOException {
 		/*
-		 * 🛑 工序二：残酷的“一票否决”安检门
+		 * 🛑 工序二：残酷的安检门 —— @Conditional 拦截
+		 * ---------------------------------------------------------
+		 * [原理解析] 写在类上的 @Conditional（如 @ConditionalOnClass、@Profile）就是在这里生效的！
 		 *
-		 * 原理解析：又是我们熟悉的老朋友 @Conditional！
-		 * 车间大白话：档案袋送进车间，第一道关卡就是安检。安检员看看图纸上有没有写诸如“只有当引入了 MySQL 驱动时才解析”的条件。
-		 * 如果条件不满足，直接把档案袋扔进废纸篓（return），后面的工序全部省了。这也是 Spring Boot 大幅提升启动速度的核心防线。
+		 * [车间大白话] 安检员拿着档案袋，掏出扫描仪 (conditionEvaluator) 对准它。如果图纸上写着
+		 * “只有当系统里有 Redis 驱动时才能解析我”，而当前系统没有，安检员直接把档案袋扔进碎纸机 (return)。
+		 * 🚨 这是 Spring Boot 能够实现“按需加载、极致提速”的第一道绝对防线！
 		 */
 		if (this.conditionEvaluator.shouldSkip(configClass.getMetadata(), ConfigurationPhase.PARSE_CONFIGURATION)) {
 			return;
 		}
 
 		/*
-		 * 🗄️ 工序三：极其烧脑的“档案室查重机制”
-		 *
-		 * 原理解析：因为配置类是可以互相引用的，系统极有可能在不同的地方多次扫到同一个配置类。Spring 在这里定下了极其严格的**“主权优先级”**规则！
-		 * 车间大白话（查重冲突解决）：
-管理员在档案柜（configurationClasses）里发现：“哎？这个 DatabaseConfig 我们之前好像解析过了！”
-你是被别人“推荐（Import）”来的？ 如果你这次是被别人 @Import 进来的，但档案室里已经有一份原来别人直接手动注册（显式）的档案了。对不起，手动注册的优先级永远最高！ 你的推荐信作废，直接 return。
-你是“亲自登门（显式）”的？ 如果你这次是光明正大通过扫描或者手动注册进来的，而档案室里那份是以前被别人“推荐”进来的。好家伙，正主来了！管理员会立刻把以前那份推荐的档案撕掉（remove），换上你这份最权威的！
+		 * 🗄️ 工序三：极其复杂的“档案室查重与冲突解决” (全段最烧脑)
+		 * ---------------------------------------------------------
+		 * [背景提要] 如果安检通过了，接下来要去系统的档案柜里查查，这张图纸以前是不是已经来过了？
+		 * 因为配置类可以互相 @Import，导致同一个类可能会被系统发现多次。Spring 制定了严谨的“主权优先级”：
 		 */
 		ConfigurationClass existingClass = this.configurationClasses.get(configClass);
-		if (existingClass != null) {
+		if (existingClass != null) {// 发现档案柜里已经有这个类了！
+			//如果真的重复了，Spring 制定了非常严谨的**“主权优先级”**规则：
+
+			/*
+			 * 🤝 情况 A：你这次是被别人“推荐 (Import)”进来的
+			 *
+			 * [原理解析] 一个类可以被多个配置类同时 @Import。mergeImportedBy 的作用是把这些
+			 * “推荐人”都记录下来。以防未来某个推荐人因 @Conditional 被干掉后，Spring 还能知道有谁保着它。
+			 * [核心逻辑] 只要你这次是被推荐进来的，不管旧档案是推荐的还是亲自登门的，都忽略本次解析 (return)。
+			 */
 			if (configClass.isImported()) {
 				if (existingClass.isImported()) {
-					existingClass.mergeImportedBy(configClass);
+					existingClass.mergeImportedBy(configClass); // 合并“推荐人”名单
 				}
+				// 忽略新的 imported 配置类；现有的图纸优先级更高。
 				// Otherwise ignore new imported config class; existing non-imported class overrides it.
-				return; // 别人显式注册的优先级更高，忽略当前被导入的
+				return;
 			}
 			else {
+				/*
+				 * 👑 情况 B：你是“亲自登门 (显式注册/包扫描)”进来的
+				 * [车间大白话] 你这次是光明正大通过 @ComponentScan 扫出来的，或者是写在 context.register() 里的，
+				 * 而柜子里的那份是以前别人 @Import 进来的。这叫“正主驾到”！
+				 *
+				 * [核心逻辑] 显式注册的优先级永远高于被动导入的！管理员立刻把旧档案从柜子里撕掉 (remove)，
+				 * 准备用你现在这份全新的档案去覆盖它！
+				 */
 				// Explicit bean definition found, probably replacing an import.
 				// Let's remove the old one and go with the new one.
 				this.configurationClasses.remove(configClass);
@@ -325,17 +436,57 @@ class ConfigurationClassParser {
 			}
 		}
 
+		/*
+		 * 🧬 工序四：追根溯源的“血统扫描机” (核磁共振仪)
+		 * ---------------------------------------------------------
+		 * [原理解析] 冲突解决完毕，开始真正的全身检查。这里又是一个神奇的 do-while 循环！
+		 * [灵魂拷问] 为什么要循环？
+		 * 假设 MyConfig 继承了 BaseConfig (里面有 @Bean 方法)。
+		 * ① 第一次扫描 MyConfig，底层方法会返回它的父类 BaseConfig (不为 null，循环继续)。
+		 * ② 第二次扫描父类 BaseConfig，把你写在父类里的 @Bean 也全部解析出来。
+		 * ③ 扫完后，再往上是 Object (返回 null，循环结束)。
+		 * 👉 结论：这保证了不管注解写在当前类，还是所有祖宗身上，统统都会被解析，一个都跑不掉！
+		 */
 		// Recursively process the configuration class and its superclass hierarchy.
-		SourceClass sourceClass = asSourceClass(configClass, filter);
+		SourceClass sourceClass = asSourceClass(configClass, filter);// 把档案袋转换为 SourceClass（方便进行类层级的向上遍历）
 		do {
+			// 💥 真正的核心干活机器！开始读取 @PropertySource、@ComponentScan、@Bean 等等
 			sourceClass = doProcessConfigurationClass(configClass, sourceClass, filter);
 		}
 		while (sourceClass != null);
 
+		/*
+		 * 🏷️ 工序五：盖章入库，档案落锁
+		 * ---------------------------------------------------------
+		 * [车间大白话] 经历完安检、查重，以及连同祖宗十八代的深层扫描后，这张配置图纸终于成了“正果”。
+		 * 盖上“解析完毕”的钢印，放进档案柜 (configurationClasses)，防止以后再被重复解析。
+		 */
 		this.configurationClasses.put(configClass, configClass);
+
+		/*
+		 * 🔮 [下一步的高能预警]
+		 * 这个车间最核心的活儿，全交给了那台在 do-while 循环里的机器 —— doProcessConfigurationClass。
+		 * 这是整个 Spring 框架中，所有注解解析的“终极大魔王”！
+		 * 在这台机器内部，是一排排整齐的代码，分别处理：
+		 * @PropertySource (加载外部 properties 文件)
+		 * @ComponentScan (真正去包里扫描业务类的底层逻辑)
+		 * @Import (引入其他组件)
+		 * @Bean (提取你写的方法)
+		 */
 	}
 
 	/**
+	 * <br>
+	 * <h3>架构巅峰：终极解析机器的“八道严格工序” 🏭</h3>
+	 * <p>
+	 * 这段代码定义了 Spring 解析一个配置类时<b>绝对不可更改的 8 道工序顺序</b>。
+	 * 这里的“顺序即正义”：必须先加载环境变量，再去扫包，再去处理导入... 弄懂了这套履带的运转逻辑，
+	 * 以后遇到任何 Spring 注解不生效、覆盖冲突的问题，你都能瞬间从底层原理上秒杀它！
+	 * </p>
+	 *
+	 * <br>
+	 * <hr>
+	 * <p><b>[Original Spring Documentation]</b></p>
 	 * Apply processing and build a complete {@link ConfigurationClass} by reading the
 	 * annotations, members and methods from the source class. This method can be called
 	 * multiple times as relevant sources are discovered.
@@ -348,17 +499,38 @@ class ConfigurationClassParser {
 			ConfigurationClass configClass, SourceClass sourceClass, Predicate<String> filter)
 			throws IOException {
 
+		/*
+		 * 🏭 第一道工序：处理“内部嵌套类” (Member Classes)
+		 * ---------------------------------------------------------
+		 * [原理解析] 检查当前类（如 AppConfig）是否带有 @Component 注解（@Configuration 底层就是 @Component）。
+		 * 如果是，立刻去检查它内部有没有写嵌套的配置类（如 static class InnerConfig { ... }）。
+		 *
+		 * [深度释疑] 为什么放第一步？
+		 * 在 Spring 架构中，内部配置类通常是为了给外部主配置类做“局部补充”或“参数覆盖”的。
+		 * 根据局部优先原则，必须把它们先揪出来，扔进车间去递归解析（让内部类也走一遍这 8 道工序），
+		 * 确保内部定义的 Bean 和配置能及早进入工厂的视线。
+		 */
 		if (configClass.getMetadata().isAnnotated(Component.class.getName())) {
 			// Recursively process any member (nested) classes first
 			processMemberClasses(configClass, sourceClass, filter);
 		}
 
+		/*
+		 * 🏭 第二道工序：加载环境变量 @PropertySource
+		 * ---------------------------------------------------------
+		 * [原理解析] attributesForRepeatable(...) 去类上寻找 @PropertySource 注解（支持写多个）。
+		 * 如果找到，processPropertySource(...) 立马读取对应的配置文件（比如 classpath:application.propertie），并将其键值对硬塞进 Spring 的全局 Environment （环境大管家）里。
+		 *
+		 * [深度释疑] 为什么放第二步？
+		 * 因为后面的工序（如扫包路径 @ComponentScan("com.demo.${env}")，或 @Value 注入），
+		 * 极有可能会用到 ${...} 占位符！如果这一步不提前把属性读到内存里，后面遇到占位符直接原地爆炸。
+		 */
 		// Process any @PropertySource annotations
 		for (AnnotationAttributes propertySource : AnnotationConfigUtils.attributesForRepeatable(
 				sourceClass.getMetadata(), PropertySources.class,
 				org.springframework.context.annotation.PropertySource.class)) {
 			if (this.environment instanceof ConfigurableEnvironment) {
-				processPropertySource(propertySource);
+				processPropertySource(propertySource); // 真正的读取属性文件动作
 			}
 			else {
 				logger.info("Ignoring @PropertySource annotation on [" + sourceClass.getMetadata().getClassName() +
@@ -366,31 +538,67 @@ class ConfigurationClassParser {
 			}
 		}
 
+		/*
+		 * 🏭 第三道工序：执行核弹级扫包 @ComponentScan (核心中的核心)
+		 * ---------------------------------------------------------
+		 * [原理解析] 这里是 Spring 启动变慢的最大“元凶”，也是最强大的地方。this.componentScanParser.parse(...) 会去底层去读取 .class 文件，
+		 * 把业务 Bean 提取成 BeanDefinition 图纸。
+		 *
+		 * [裂变源头] 接下来的 for 循环极其关键。它会仔细端详刚扫出来的这些图纸，如果发现某个被扫出
+		 * 来的类自己也是个配置类（比如扫出了一个 RedisConfig），系统绝不含糊，立马递归调用 parse()，
+		 * 让 RedisConfig 也从外围的工序一重新跑一遍，确保持续裂变，直到榨干所有注解。
+		 */
 		// Process any @ComponentScan annotations
 		Set<AnnotationAttributes> componentScans = AnnotationConfigUtils.attributesForRepeatable(
 				sourceClass.getMetadata(), ComponentScans.class, ComponentScan.class);
+		// 如果有 @ComponentScan 注解，且没有被 @Conditional 拦截掉
 		if (!componentScans.isEmpty() &&
 				!this.conditionEvaluator.shouldSkip(sourceClass.getMetadata(), ConfigurationPhase.REGISTER_BEAN)) {
 			for (AnnotationAttributes componentScan : componentScans) {
+
+				// 【动作 1】开动扫包机器！去你的包路径下把 @Service, @Controller 全扫出来变成图纸
 				// The config class is annotated with @ComponentScan -> perform the scan immediately
 				Set<BeanDefinitionHolder> scannedBeanDefinitions =
 						this.componentScanParser.parse(componentScan, sourceClass.getMetadata().getClassName());
+
+				// 【动作 2】检查刚扫出来的图纸，看看里面有没有隐藏的配置类？
 				// Check the set of scanned definitions for any further config classes and parse recursively if needed
 				for (BeanDefinitionHolder holder : scannedBeanDefinitions) {
 					BeanDefinition bdCand = holder.getBeanDefinition().getOriginatingBeanDefinition();
 					if (bdCand == null) {
 						bdCand = holder.getBeanDefinition();
 					}
+
+					// 检查这张图纸头上有没有 @Configuration 或 @Component 等注解
 					if (ConfigurationClassUtils.checkConfigurationClassCandidate(bdCand, this.metadataReaderFactory)) {
+						// 【动作3】如果有，大裂变开始！把它当作一个全新的配置类，调用外层的 parse 方法，重新送进流水线！
 						parse(bdCand.getBeanClassName(), holder.getBeanName());
 					}
 				}
 			}
 		}
 
+		/*
+		 * 🏭 第四道工序：处理引入的兄弟 @Import (Spring Boot 魔法的基石)
+		 * ---------------------------------------------------------
+		 * [原理解析] 寻找 @Import 注解。processImports 内部的逻辑极其复杂且精妙，
+		 * 它将导入的类严格分为三种“材质”并分别处理：
+		 * ① 普通配置类：直接当作新的配置类去递归解析。
+		 * ② ImportSelector：动态选择器。执行它的方法，返回一批类名，然后再去解析这批类。（这也是前面提到的 DeferredImportSelector 延迟自动装配的接口父类）
+		 * ③ ImportBeanDefinitionRegistrar：拥有最高权限的“特派员”。直接给它图纸注册表 (Registry)，让它自己写代码去底层手动注册图纸。
+		 * 👉 Spring Boot 的各种 @EnableXXX (如 @EnableAsync) 底层全都是靠这三种材质玩转的！
+		 */
 		// Process any @Import annotations
 		processImports(configClass, sourceClass, getImports(sourceClass), filter, true);
 
+		/*
+		 * 🏭 第五道工序：兼容老旧 XML 配置 @ImportResource
+		 * ---------------------------------------------------------
+		 * [深度释疑] 为什么这里只是存路径，不立刻解析 XML？
+		 * 如果你用了 @ImportResource("classpath:spring.xml")，它只是把 XML 路径存进 configClass
+		 * 这个档案袋里。因为必须要等所有的纯 Java 注解全解析完之后，再统一去解析 XML，
+		 * 从而在架构层面保证：Java 注解配置的优先级始终高于老旧的 XML 配置！
+		 */
 		// Process any @ImportResource annotations
 		AnnotationAttributes importResource =
 				AnnotationConfigUtils.attributesFor(sourceClass.getMetadata(), ImportResource.class);
@@ -398,31 +606,60 @@ class ConfigurationClassParser {
 			String[] resources = importResource.getStringArray("locations");
 			Class<? extends BeanDefinitionReader> readerClass = importResource.getClass("reader");
 			for (String resource : resources) {
+				// 完美利用第二道工序加载的环境变量，解析占位符 (如把 "classpath:config-${env}.xml" 变成 "classpath:config-dev.xml")
 				String resolvedResource = this.environment.resolveRequiredPlaceholders(resource);
+				// 把 XML 路径记录在当前配置类的模型里， 暂不解析
 				configClass.addImportedResource(resolvedResource, readerClass);
 			}
 		}
 
+		/*
+		 * 🏭 第六道工序：提取手写的 @Bean 方法
+		 * ---------------------------------------------------------
+		 * [原理解析] 用反射遍历当前配置类里的所有方法，把带有 @Bean 的方法挑出来。
+		 * [深度释疑] 注意防坑！这里绝对没有调用你的方法（没有 new 对象）！
+		 * 这里只是提取了方法的元数据（方法名、返回值类型等），包装成 BeanMethod 零件挂在档案袋上。
+		 * 等以后真正开始实例化 Bean 时，Spring 才会去反射调用这些方法。
+		 */
 		// Process individual @Bean methods
 		Set<MethodMetadata> beanMethods = retrieveBeanMethodMetadata(sourceClass);
 		for (MethodMetadata methodMetadata : beanMethods) {
+			// 把每个 @Bean 方法包装成 BeanMethod 零件，挂在 configClass 档案袋上
 			configClass.addBeanMethod(new BeanMethod(methodMetadata, configClass));
 		}
 
+		/*
+		 * 🏭 第七道工序：提取接口上的默认方法 (Java 8 特性支持)
+		 * ---------------------------------------------------------
+		 * [原理解析] 如果你的配置类实现了一个接口，且该接口里写了一个 default 方法并贴了
+		 * @Bean 注解，Spring 会在这里顺藤摸瓜把它提取出来，同样挂在档案袋上。
+		 */
 		// Process default methods on interfaces
 		processInterfaces(configClass, sourceClass);
 
+		/*
+		 * 🏭 第八道工序：追根溯源，挖出父类 (配合外层 do-while 循环)
+		 * ---------------------------------------------------------
+		 * [原理解析] 检查配置类是否继承了其他类 (如 AppConfig extends BaseConfig)。
+		 * 只要父类存在，且不是 JDK 自带的基础类 (java.* 开头)，且之前没处理过，
+		 * 它就把这个父类 return 回去。
+		 * * [深度释疑] 外层的 do-while 循环拿到这个返回的父类后，一看不是 null，就会立马把父类
+		 * 重新送进第一道工序，让父类也把这 8 道工序再跑一遍！这就实现了极致的深度类继承体系解析。
+		 */
 		// Process superclass, if any
 		if (sourceClass.getMetadata().hasSuperClass()) {
+			// 获取父类的名字
 			String superclass = sourceClass.getMetadata().getSuperClassName();
+			// 如果父类存在，且不是 JDK 自带的类 (java.* 开头)，且之前没处理过
 			if (superclass != null && !superclass.startsWith("java") &&
 					!this.knownSuperclasses.containsKey(superclass)) {
-				this.knownSuperclasses.put(superclass, configClass);
+				this.knownSuperclasses.put(superclass, configClass);// 记录一下
 				// Superclass found, return its annotation metadata and recurse
-				return sourceClass.getSuperClass();
+				return sourceClass.getSuperClass();// 找到父类，直接 return 给外层的 do-while 循环去继续递归！
 			}
 		}
 
+		// 彻底没有父类了 (或者父类是 Object)，全套工序完毕，下线！
 		// No superclass -> processing is complete
 		return null;
 	}

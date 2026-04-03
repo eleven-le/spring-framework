@@ -13,6 +13,8 @@ dependencies {
     api(project(":spring-aop"))
     api(project(":spring-tx"))
     api(project(":spring-jdbc"))
+    api(project(":spring-context-support"))
+    api(project(":spring-web"))
     api("org.aspectj:aspectjweaver:1.9.7")
 
     // 补充 JSR-250 注解依赖
@@ -20,6 +22,11 @@ dependencies {
 
     // 内嵌数据库 (事务实验用)
     implementation("com.h2database:h2:2.1.214")
+
+    // MyBatis-Spring 集成 (W92 练兵场)
+    // mybatis-spring 2.1.x 兼容 Spring 5.x; 3.0.x 需要 Spring 6.x
+    implementation("org.mybatis:mybatis:3.5.13")
+    implementation("org.mybatis:mybatis-spring:2.1.2")
 
     testImplementation("org.junit.jupiter:junit-jupiter-api")
     testImplementation("org.assertj:assertj-core")

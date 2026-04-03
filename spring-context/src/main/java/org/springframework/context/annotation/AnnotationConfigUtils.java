@@ -39,6 +39,81 @@ import org.springframework.lang.Nullable;
 import org.springframework.util.ClassUtils;
 
 /**
+ * <h1>🗺️ 一、架构坐标·全局定位</h1>
+ * <h2>注解驱动的"军火库管理员"——在容器中默默埋下 6 大内置处理器的幕后英雄！</h2>
+ * <ul>
+ * <li><b>全限定名</b>：{@code org.springframework.context.annotation.AnnotationConfigUtils}</li>
+ * <li><b>中文名</b>：注解配置工具类 —— 注解驱动基础设施的"预装工"</li>
+ * <li><b>所属车间 🏭</b>：{@code spring-context} 模块的 annotation 包（注意！annotation 包 = 注解驱动编程模型的大本营！
+ * 注解定义、解析引擎、Reader/Scanner、上下文入口，以及本类——注解基础设施的"军火补给站"，全在这里。
+ * 一句话：<b>凡是和"用注解代替 XML"相关的，都在这个包里！</b>）</li>
+ * <li><b>类性质</b>：<b>抽象工具类</b>（abstract + 全 static 方法 + 不可实例化），是框架内部的"隐藏后勤"</li>
+ * </ul>
+ *
+ * <h3>💡 为什么需要这个工具类？——注解驱动需要"预装"一批基础设施处理器！</h3>
+ * <p>当你写 {@code new AnnotationConfigApplicationContext(AppConfig.class)} 时，
+ * Spring 能识别 @Configuration、@Bean、@Autowired、@PostConstruct、@EventListener 等注解——
+ * 但这些"识别能力"不是凭空来的！每种注解都需要一个对应的<b>处理器（Processor）</b>来解析执行。</p>
+ * <p>本类的核心方法 {@code registerAnnotationConfigProcessors()} 就是那个<b>在容器启动前就把
+ * 这些处理器全部安排就位</b>的"幕后英雄"。</p>
+ *
+ * <h3>🧬 6 大内置处理器——本类注册的"核心员工"</h3>
+ * <table border="1" cellpadding="5" cellspacing="0">
+ * <tr><th>#</th><th>Bean 名称（常量）</th><th>处理器类</th><th>负责解析的注解</th><th>身份</th></tr>
+ * <tr><td>1</td><td>internalConfigurationAnnotationProcessor</td><td>{@link ConfigurationClassPostProcessor}</td>
+ *     <td>@Configuration, @Bean, @Import, @ComponentScan, @PropertySource</td><td>BDRPP（图纸设计师）</td></tr>
+ * <tr><td>2</td><td>internalAutowiredAnnotationProcessor</td><td>{@link org.springframework.beans.factory.annotation.AutowiredAnnotationBeanPostProcessor}</td>
+ *     <td>@Autowired, @Value, @Inject</td><td>BPP（质检员）</td></tr>
+ * <tr><td>3</td><td>internalCommonAnnotationProcessor</td><td>{@link CommonAnnotationBeanPostProcessor}</td>
+ *     <td>@Resource, @PostConstruct, @PreDestroy</td><td>BPP（质检员）</td></tr>
+ * <tr><td>4</td><td>internalEventListenerProcessor</td><td>{@link EventListenerMethodProcessor}</td>
+ *     <td>@EventListener</td><td>BFPP + SmartInitializingSingleton</td></tr>
+ * <tr><td>5</td><td>internalEventListenerFactory</td><td>{@link org.springframework.context.event.DefaultEventListenerFactory}</td>
+ *     <td>（@EventListener 的工厂配套）</td><td>普通 Bean</td></tr>
+ * <tr><td>6</td><td>internalPersistenceAnnotationProcessor</td><td>PersistenceAnnotationBeanPostProcessor</td>
+ *     <td>@PersistenceContext, @PersistenceUnit（JPA）</td><td>BPP（仅 JPA 环境存在时注册）</td></tr>
+ * </table>
+ *
+ * <h3>🧬 调用链路——谁在什么时候调用本类？</h3>
+ * <pre>
+ * new AnnotationConfigApplicationContext()
+ *   └── new AnnotatedBeanDefinitionReader(this)         ← Reader 构造器
+ *         └── AnnotationConfigUtils.registerAnnotationConfigProcessors(registry)  ← 👈 本类在此被调用！
+ *               ├── 注册 ConfigurationClassPostProcessor（解析 @Configuration 的大脑）
+ *               ├── 注册 AutowiredAnnotationBeanPostProcessor（执行 @Autowired 的双手）
+ *               ├── 注册 CommonAnnotationBeanPostProcessor（执行 @Resource/@PostConstruct 的双手）
+ *               ├── 注册 EventListenerMethodProcessor（处理 @EventListener）
+ *               ├── 注册 DefaultEventListenerFactory（@EventListener 工厂）
+ *               ├── 注册 PersistenceAnnotationBeanPostProcessor（JPA 环境，可选）
+ *               └── 设置 AnnotationAwareOrderComparator + ContextAnnotationAutowireCandidateResolver
+ * </pre>
+ *
+ * <h3>🧬 设计精髓——你的业务能偷师什么？</h3>
+ * <ol>
+ * <li><b>"约定优于配置"的基础设施预装</b><br/>
+ * 用户不需要手动声明这些处理器——Spring 在创建 Reader 时就默默注册好了。
+ * 这就是"约定优于配置"的落地：<b>你只需写 @Autowired，不需要知道 AutowiredAnnotationBeanPostProcessor 的存在</b>。<br/>
+ * <b>业务借鉴</b>：你的框架/SDK 也应该有"默认预装"机制——用户引入依赖就能用，
+ * 不需要额外配置 20 个处理器。</li>
+ *
+ * <li><b>条件化注册——有 JPA 才注册 JPA 处理器</b><br/>
+ * PersistenceAnnotationBeanPostProcessor 只在 classpath 存在 JPA API 时才注册
+ * （通过 ClassUtils.isPresent 检查）。<br/>
+ * 这是 Spring Boot @ConditionalOnClass 的原始形态——在 Spring Framework 层面就已经有了按需注册的思想。</li>
+ *
+ * <li><b>除了注册处理器，还配置了两个关键基础设施</b><br/>
+ * ① {@code AnnotationAwareOrderComparator}：让 @Order 和 @Priority 注解生效的排序器<br/>
+ * ② {@code ContextAnnotationAutowireCandidateResolver}：支持 @Lazy/@Qualifier 的候选解析器<br/>
+ * 这些"静默配置"让整个注解驱动体系能正常运转。</li>
+ * </ol>
+ *
+ * <h3>🎯 三、战略复盘</h3>
+ * <p>AnnotationConfigUtils 的核心价值：<b>在容器启动的最早期（Reader 构造时），
+ * 向 Registry 预装 6 大内置处理器 + 2 大基础设施组件</b>。<br/>
+ * 它是"约定优于配置"的幕后功臣——你之所以能直接用 @Autowired/@Configuration/@EventListener 等注解，
+ * 是因为本类在你无感知的情况下就把对应的处理器安排妥当了。</p>
+ *
+ * <hr/>
  * Utility class that allows for convenient registration of common
  * {@link org.springframework.beans.factory.config.BeanPostProcessor} and
  * {@link org.springframework.beans.factory.config.BeanFactoryPostProcessor}
@@ -163,7 +238,6 @@ public abstract class AnnotationConfigUtils {
 			 * 2. 装配“注解感知”的排序器 (Comparator)
 			 * ---------------------------------------------------------
 			 * [作用] 检查并为底层 Bean 工厂装配 AnnotationAwareOrderComparator（注解感知的顺序比较器）。
-			 *
 			 * [解决痛点] 假设项目中定义了多个实现同一接口的 Bean，并按集合注入（如 List<MyInterface>），
 			 * 原生的 Bean 工厂并不知道该按什么顺序把它们放进 List 里。
 			 *
@@ -177,7 +251,6 @@ public abstract class AnnotationConfigUtils {
 			 * 3. 装配“注解自动装配”候选解析器 (Resolver)
 			 * ---------------------------------------------------------
 			 * [作用] 为 Bean 工厂装配 ContextAnnotationAutowireCandidateResolver（上下文注解自动装配候选解析器）。
-			 *
 			 * [解决痛点] 原生工厂在自动装配（Autowire）时，主要靠简单的 byType 或 byName。
 			 * 引入注解开发后，注入逻辑变得极其复杂，需要一个更智能的大脑来决定“谁能被注入”。
 			 *
@@ -190,14 +263,14 @@ public abstract class AnnotationConfigUtils {
 				beanFactory.setAutowireCandidateResolver(new ContextAnnotationAutowireCandidateResolver());
 			}
 		}
-		/*
-		 * 💡 [架构启示]：组合优于继承与 OCP 原则
-		 * ---------------------------------------------------------
-		 * 从这短短十几行代码中，我们可以学到 Spring 优秀的可扩展性设计原则：
-		 * 1. 纯粹的核心：核心容器（DefaultListableBeanFactory）本身被设计得很纯粹， 它不包含任何对特定注解（如 @Order, @Qualifier）的硬编码。
-		 * 2. 策略与组合：相反，它是通过组合（Composition）的方式，留出了 Comparator  和 Resolver 的扩展点。
-		 * 3. 开闭原则 (OCP)：当我们要开启注解编程模式时，只需要把带有“注解解析能力”的 策略对象塞进核心容器即可。底层引擎无需修改源代码，完美契合开闭原则 (OCP)。
-		 */
+/*
+ * 💡 [架构启示]：组合优于继承与 OCP 原则
+ * ---------------------------------------------------------
+ * 从这短短十几行代码中，我们可以学到 Spring 优秀的可扩展性设计原则：
+ * 1. 纯粹的核心：核心容器（DefaultListableBeanFactory）本身被设计得很纯粹， 它不包含任何对特定注解（如 @Order, @Qualifier）的硬编码。
+ * 2. 策略与组合：相反，它是通过组合（Composition）的方式，留出了 Comparator  和 Resolver 的扩展点。
+ * 3. 开闭原则 (OCP)：当我们要开启注解编程模式时，只需要把带有“注解解析能力”的 策略对象塞进核心容器即可。底层引擎无需修改源代码，完美契合开闭原则 (OCP)。
+ */
 
 
 		/*
@@ -221,7 +294,6 @@ public abstract class AnnotationConfigUtils {
 		if (!registry.containsBeanDefinition(CONFIGURATION_ANNOTATION_PROCESSOR_BEAN_NAME)) {
 			/*
 			 * 定义与追溯：基础设施的专属身份
-			 *
 			 * [RootBeanDefinition] 在 Spring 中，Bean 的图纸分为很多种。对于框架内部的基础设施类，
 			 * Spring 一律使用 RootBeanDefinition。它代表这是一个完整、独立、没有父类的顶级 Bean 定义。
 			 *
@@ -233,7 +305,6 @@ public abstract class AnnotationConfigUtils {
 			def.setSource(source);
 			/*
 			 * 注册与打包：完成闭环
-			 *
 			 * [底层动作] registerPostProcessor 是一个辅助方法。它真正在底层调用了 registry.registerBeanDefinition(...)，
 			 * 把这张“图纸”放进了 DefaultListableBeanFactory 核心的 ConcurrentHashMap 缓存中。
 			 *
@@ -244,7 +315,7 @@ public abstract class AnnotationConfigUtils {
 		}
 
 		/*
-		 *  【2号大将】：注册 AutowiredAnnotationBeanPostProcessor, 专门处理 @Autowired, @Value, @Inject 注解的依赖注入
+		 *【2号大将】：注册 AutowiredAnnotationBeanPostProcessor, 专门处理 @Autowired, @Value, @Inject 注解的依赖注入
 		 * 职责：负责在 Bean 的生命周期中，把带有 @Autowired 的属性或方法自动注入进来（也就是常说的 DI 依赖注入）。
 		 * 身份：它实现了 BeanPostProcessor，会在 Bean 实例化的过程中介入。
 		 */
@@ -256,7 +327,7 @@ public abstract class AnnotationConfigUtils {
 
 		// Check for JSR-250 support, and if present add the CommonAnnotationBeanPostProcessor.
 		/*
-		 *  【3号大将】：注册 CommonAnnotationBeanPostProcessor,  专门处理 JSR-250 规范的注解，比如 @Resource, @PostConstruct, @PreDestroy
+		 * 【3号大将】：注册 CommonAnnotationBeanPostProcessor,  专门处理 JSR-250 规范的注解，比如 @Resource, @PostConstruct, @PreDestroy
 		 * 职责：如果你喜欢用 @Resource 来替代 @Autowired，或者用 @PostConstruct 来做初始化逻辑，底层就是靠它来解析和执行的。
 		 */
 		if (jsr250Present && !registry.containsBeanDefinition(COMMON_ANNOTATION_PROCESSOR_BEAN_NAME)) {
@@ -311,7 +382,6 @@ public abstract class AnnotationConfigUtils {
 	 */
 	private static BeanDefinitionHolder registerPostProcessor(
 			BeanDefinitionRegistry registry, RootBeanDefinition definition, String beanName) {
-
 		/*
 		 * 1. 打上“皇家御用”的思想钢印 (设置基础设施角色)
 		 * ---------------------------------------------------------

@@ -85,6 +85,111 @@ import org.springframework.util.StringUtils;
 import org.springframework.util.StringValueResolver;
 
 /**
+ * <h1>🗺️ 一、架构坐标·全局定位</h1>
+ * <h2>抽象 Bean 工厂——继承链的"第四层"，整个 getBean 流程的总编排师！</h2>
+ * <ul>
+ * <li><b>全限定名</b>：{@code org.springframework.beans.factory.support.AbstractBeanFactory}</li>
+ * <li><b>中文名</b>：抽象 Bean 工厂 —— 模板方法模式的教科书范例，定义"怎么提货"的死骨架</li>
+ * <li><b>所属车间 🏭</b>：{@code spring-beans} 模块</li>
+ * <li><b>类层级</b>：{@code FactoryBeanRegistrySupport} 的子类，实现 {@code ConfigurableBeanFactory} 接口</li>
+ * </ul>
+ *
+ * <h3>💡 为什么要拆出这个抽象类？——"流程骨架"与"具体创建"必须解耦！</h3>
+ * <p>Spring 架构师面对一个经典的框架设计问题：<b>getBean 的流程是确定的，但"从哪里拿图纸"和"怎么造 Bean"是变化的</b>。</p>
+ * <ul>
+ * <li><b>确定的流程（本类实现）</b>：名字标准化 → 查缓存 → 检测循环依赖 → 委托父容器 → 合并 BeanDefinition
+ *     → 处理 @DependsOn → 按 Scope 分发（Singleton/Prototype/自定义）→ 类型适配 → 返回</li>
+ * <li><b>变化的两个钩子（子类实现）</b>：
+ *     <ul>
+ *     <li>{@code getBeanDefinition(beanName)} —— "图纸从哪来？" 可以从 Map 里查（DefaultListableBeanFactory），
+ *         也可以从远程配置中心/数据库查（自定义实现）</li>
+ *     <li>{@code createBean(beanName, mbd, args)} —— "怎么造 Bean？" 推断构造器、反射实例化、依赖注入、
+ *         初始化回调、AOP 代理——这些细节全在 AbstractAutowireCapableBeanFactory 中</li>
+ *     </ul>
+ * </li>
+ * </ul>
+ * <p>这正是<b>模板方法模式</b>的完美应用：AbstractBeanFactory 是"导演"，规定了拍电影的流程（分镜脚本），
+ * 但"演员怎么表演"（createBean）和"剧本从哪来"（getBeanDefinition）交给子类决定。</p>
+ *
+ * <h3>🧬 这个类的核心职责矩阵</h3>
+ * <table border="1" cellpadding="5" cellspacing="0">
+ * <tr><th>职责领域</th><th>关键方法</th><th>设计思想</th></tr>
+ * <tr><td>🫀 提货总入口</td><td>{@code doGetBean()}</td><td>模板方法：编排从缓存到创建的完整流程</td></tr>
+ * <tr><td>🔄 父子委派</td><td>{@code getParentBeanFactory() + doGetBean}</td><td>双亲委派：本厂没图纸就甩给父厂</td></tr>
+ * <tr><td>📋 图纸合并</td><td>{@code getMergedLocalBeanDefinition()}</td><td>配置复用：child BD 继承 parent BD 的公共属性</td></tr>
+ * <tr><td>🏗️ FactoryBean 拆盒</td><td>{@code getObjectForBeanInstance()}</td><td>透明代理：用户无感知地获取 FactoryBean 产物</td></tr>
+ * <tr><td>🔧 配置管理</td><td>{@code addBeanPostProcessor/setParentBeanFactory/registerScope}</td><td>ConfigurableBeanFactory SPI 实现</td></tr>
+ * <tr><td>🔒 类型转换</td><td>{@code ConversionService/PropertyEditor}</td><td>可插拔的类型转换体系</td></tr>
+ * <tr><td>📝 BPP 管理</td><td>{@code beanPostProcessors + BeanPostProcessorCache}</td><td>质检员注册与分类缓存</td></tr>
+ * </table>
+ *
+ * <h3>🧬 业务借鉴——你的系统能偷师什么？</h3>
+ * <ol>
+ * <li><b>"模板方法 + 抽象钩子"的框架设计范式</b><br/>
+ * 这是构建可扩展框架的黄金模式。在业务中：订单处理流程是确定的（验证→扣库存→扣款→发货），
+ * 但"怎么验证"、"怎么扣款"可能因支付渠道不同而变化。<br/>
+ * 把流程写成 final 的模板方法 {@code processOrder()}，把变化点定义为 abstract 钩子
+ * {@code doDeductPayment()}，不同支付渠道继承并覆盖钩子——这就是 AbstractBeanFactory 的精髓。</li>
+ *
+ * <li><b>"doXxx"命名约定的深层含义</b><br/>
+ * Spring 中 {@code getBean()} 是公开 API，{@code doGetBean()} 是内部实现。
+ * 外层方法负责"门面"（参数包装、异常转换），内层 doXxx 负责"干活"。<br/>
+ * 业务借鉴：在你的 Service 层，公开方法 {@code createOrder()} 负责权限校验和事务包装，
+ * 内部 {@code doCreateOrder()} 负责核心逻辑。这让关注点分离更清晰，也方便 AOP 切面拦截。</li>
+ *
+ * <li><b>"20 个字段"的配置集中管理</b><br/>
+ * AbstractBeanFactory 持有 ~20 个配置字段（parentBeanFactory、beanClassLoader、conversionService、
+ * beanPostProcessors、scopes、mergedBeanDefinitions 等），全部通过 ConfigurableBeanFactory 接口暴露。<br/>
+ * 业务借鉴：复杂系统的核心引擎类，把所有可配置项集中管理，通过接口暴露读写方法，
+ * 而不是散落在各个子模块中。集中管理 = 一览全局 = 易于审计和测试。</li>
+ *
+ * <li><b>"不假设可枚举"的开放设计</b><br/>
+ * 原始 Javadoc 说 "Does not assume a listable bean factory"——AbstractBeanFactory 故意不实现
+ * ListableBeanFactory 的批量查询方法。这意味着 BeanDefinition 的来源不一定是内存 Map，
+ * 可以是数据库、远程配置中心等"查一次很贵"的后端。<br/>
+ * 业务借鉴：设计抽象层时，不要假设数据来源是快速可枚举的。
+ * 如果你的接口既有"按 ID 查单个"又有"列出全部"，考虑把它们拆到不同的接口层级中。</li>
+ * </ol>
+ *
+ * <h3>🧬 继承体系定位</h3>
+ * <pre>
+ * AliasRegistry (接口)
+ * └── SimpleAliasRegistry                ← 第一层：别名管理
+ *       └── DefaultSingletonBeanRegistry     ← 第二层：单例三级缓存
+ *             └── FactoryBeanRegistrySupport     ← 第三层：FactoryBean 产物缓存
+ *                   └── AbstractBeanFactory          ← 👈 你在这里！第四层：getBean 流程总编排
+ *                         │   implements ConfigurableBeanFactory
+ *                         │   abstract methods: getBeanDefinition(), createBean()
+ *                         └── AbstractAutowireCapableBeanFactory  ← 第五层：createBean 实现
+ *                               └── DefaultListableBeanFactory       ← 第六层：终极合体
+ * </pre>
+ *
+ * <h3>🗂️ 二、~20 个核心字段·分为 5 大类</h3>
+ * <table border="1" cellpadding="5" cellspacing="0">
+ * <tr><th>类别</th><th>字段</th><th>说明</th></tr>
+ * <tr><td rowspan="2">🏢 工厂层级</td><td>{@code parentBeanFactory}</td><td>父工厂引用（双亲委派）</td></tr>
+ * <tr><td>{@code beanClassLoader / tempClassLoader}</td><td>类加载器</td></tr>
+ * <tr><td rowspan="4">🔧 类型转换</td><td>{@code conversionService}</td><td>Spring 3.0+ 新转换体系</td></tr>
+ * <tr><td>{@code propertyEditorRegistrars}</td><td>PropertyEditor 注册器</td></tr>
+ * <tr><td>{@code customEditors}</td><td>自定义属性编辑器</td></tr>
+ * <tr><td>{@code typeConverter}</td><td>类型转换器</td></tr>
+ * <tr><td rowspan="3">👮 BPP 管理</td><td>{@code beanPostProcessors}</td><td>质检员列表</td></tr>
+ * <tr><td>{@code beanPostProcessorCache}</td><td>按类型分类的 BPP 缓存</td></tr>
+ * <tr><td>{@code embeddedValueResolvers}</td><td>${} 占位符解析器</td></tr>
+ * <tr><td rowspan="2">🎭 作用域</td><td>{@code scopes}</td><td>scopeName → Scope 实现的映射</td></tr>
+ * <tr><td>{@code prototypesCurrentlyInCreation}</td><td>ThreadLocal 防 Prototype 循环依赖</td></tr>
+ * <tr><td rowspan="3">📋 BD 管理</td><td>{@code mergedBeanDefinitions}</td><td>合并后的 RootBeanDefinition 缓存</td></tr>
+ * <tr><td>{@code alreadyCreated}</td><td>已创建标记集合（冻结 BD 修改）</td></tr>
+ * <tr><td>{@code beanExpressionResolver}</td><td>SpEL 表达式解析器</td></tr>
+ * </table>
+ *
+ * <h3>🎯 三、战略复盘</h3>
+ * <p>AbstractBeanFactory 是模板方法模式的教科书实现：{@code doGetBean()} 定义了从缓存到创建的完整流程骨架，
+ * 但把"图纸从哪来"（{@code getBeanDefinition}）和"怎么造 Bean"（{@code createBean}）两个变化点留给子类。
+ * 它向上继承了三层基础设施（别名→单例缓存→FactoryBean 缓存），向下通过两个抽象方法连接具体实现——
+ * 这种"承上启下"的定位，让 Spring 容器既有确定的流程保障，又有无限的扩展空间。</p>
+ *
+ * <hr/>
  * Abstract base class for {@link org.springframework.beans.factory.BeanFactory}
  * implementations, providing the full capabilities of the
  * {@link org.springframework.beans.factory.config.ConfigurableBeanFactory} SPI.
@@ -235,6 +340,29 @@ public abstract class AbstractBeanFactory extends FactoryBeanRegistrySupport imp
 	}
 
 	/**
+	 * <h3>架构巅峰：Spring 的绝对心脏与生杀大权 🫀</h3>
+	 * <p>
+	 * {@code doGetBean}，这就是 Spring 框架的绝对心脏！无论你是用 {@code @Autowired} 注入，
+	 * 还是手动 {@code context.getBean()}，底层 100% 全都会汇聚到这个方法里！
+	 * 它掌管着单例、多例、作用域、父子容器、循环依赖的生杀大权！
+	 * </p>
+	 * <p>
+	 * 它完美诠释了 Spring 的三大核心思想：<b>“极速缓存 (空间换时间)”</b>、<b>“职责分离 (甩锅的艺术)”</b>、
+	 * 以及<b>“防御性编程 (把一切死锁掐死在摇篮里)”</b>。咱们直接在源码里开辟战场，逐行实况解说！
+	 * </p>
+
+	 * Return an instance, which may be shared or independent, of the specified bean.
+	 * @param name 客户报的名字 (可能带 & 符号，也可能是小名/别名)
+	 * @param requiredType 客户期望的类型 (用来做出厂质检)
+	 * @param args 客户私人定制的构造参数 (主要用于 prototype 按需创建)
+	 * @param typeCheckOnly 客户是不是只是来看看类型的 (不提货)
+	 * @return an instance of the bean
+	 * @throws BeansException if the bean could not be created
+	 *
+	 *
+	 * <br>
+	 * <hr>
+	 * <p><b>[Original Spring Documentation]</b></p>
 	 * Return an instance, which may be shared or independent, of the specified bean.
 	 * @param name the name of the bean to retrieve
 	 * @param requiredType the required type of the bean to retrieve
@@ -249,37 +377,65 @@ public abstract class AbstractBeanFactory extends FactoryBeanRegistrySupport imp
 	protected <T> T doGetBean(
 			String name, @Nullable Class<T> requiredType, @Nullable Object[] args, boolean typeCheckOnly)
 			throws BeansException {
+/* ================================================ 🎬 第一幕：前台接待处 —— 撕下面具，白嫖现货 (缓存思想) ================================================
+ * 大管家接客的最高准则：能用现成的，绝不开动机器！*/
 
+		/* 🕵️‍♂️【动作 1：撕下伪装面具】(名字标准化)
+		 * 关键预处理：将传入的 name 转换为真正的 beanName 名字标准化先搞清楚你在叫谁。你说“我要找 &myFactory”或“找 userAlias”，酒店前台第一件事是把「小名/外号/别名」翻译成官方登记的真实房间号。这是后续逻辑的基石，beanName 必须是干净、标准的内部名。
+		 * 例:  1. 如果 name 以 "&" 开头（FactoryBean 的特殊前缀），去掉它得到真实 beanName 2. 将别名（alias）解析为注册时的规范名
+		 * 例如：name="&myFactory" → beanName="myFactory" / name="userAlias"  → beanName="userService" */
 		String beanName = transformedBeanName(name);
-		Object beanInstance;
+		Object beanInstance; // 最终要返回的 bean 实例，先占坑
 
+		/* 📦【动作 2：突击检查缓存】(极度高能！三级缓存总入口)  Spring 思想：空间换时间 & 解决循环依赖。
+		 * 礼宾官先瞄一眼“已有房客登记本”。getSingleton(beanName) 会依次查三级缓存：  ① singletonObjects (一级)：完全初始化好的成品 Bean，直接取走。 ② earlySingletonObjects (二级)：已实例化但未完成属性注入的“半成品”。 ③ singletonFactories (三级)：存放 ObjectFactory，调用它可提前暴露代理对象。
+		 * 👉 这是 Spring 解决循环依赖的核心机制所在！（三级缓存在这里埋下伏笔）。 */
 		// Eagerly check singleton cache for manually registered singletons.
 		Object sharedInstance = getSingleton(beanName);
+		/* 🎯【动作 3：现货命中判定】
+		 * 命中条件：仓库里有现货 AND 客户没有提“私人定制”要求 (args == null)。(如果客户传了 args，说明要用特殊参数重新 new 一个，那就绝对不能拿公共仓库里的现货糊弄他！) */
 		if (sharedInstance != null && args == null) {
+			/* 🎙️【解说员播报：是成品还是半成品？】 日志在这里非常有意思——它在悄悄告诉你：「这个 Bean 还没初始化完，但我提前把它借给你了，原因是循环依赖。」这条 trace 日志是你排查循环依赖问题时最好的朋友。*/
 			if (logger.isTraceEnabled()) {
 				if (isSingletonCurrentlyInCreation(beanName)) {
+					// 此时机器还在车间流水线上，却被硬生生提出来了。这说明发生了“循环依赖”！ logger.trace("Returning eagerly cached instance... 警报：发生了循环依赖，交出的是提前暴露的半成品躯壳！");
 					logger.trace("Returning eagerly cached instance of singleton bean '" + beanName +
 							"' that is not fully initialized yet - a consequence of a circular reference");
 				}
 				else {
+					// 正常情况，拿到了完整的单例对象 logger.trace("Returning cached instance... 完美：直接从单例池提取到成品！");
 					logger.trace("Returning cached instance of singleton bean '" + beanName + "'");
 				}
 			}
+
+			/* 🎁【动作 4：拆解盲盒】(处理 FactoryBean 机制) Spring 思想：对扩展开放（工厂模式）。
+			 * 仓库里拿出来的 sharedInstance 可能是普通机器，也可能是“专门造机器的机器 (FactoryBean，比如 MyBatis 的 SqlSessionFactoryBean)”。 该方法会判断：客户到底是要厂长本人(&前缀)，还是厂长造出的产品？它负责剥离最终产品。
+			 * 1. 如果 name 有 & 前缀 → 返回 FactoryBean 本体。 2. 否则 → 如果它是 FactoryBean，调用 getObject() 取产品；普通 Bean 则直接返回 */
 			beanInstance = getObjectForBeanInstance(sharedInstance, name, beanName, null);
 		}
 
 		else {
+/* ================================================ 🛑 第二幕：安检防爆与“向上管理” —— 甩锅的艺术 ================================================
+ * 仓库没货准备开工！按启动按钮前，必须展现极其严密的防御性编程思想！*/
+			/* 💥【动作 5：安检门一 (多例死循环防爆拦截！)】  Spring 思想：Fail-Fast（快速失败机制）。
+			 * 原型模式 (Prototype) 每次提货都要造全新的。如果 A(多例) 依赖 B(多例)，B 又依赖 A，造 A 去造 B，造 B 又要求造一个“全新”的 A... 无限套娃，JVM 会直接 StackOverflowError 爆栈死机！
+			 * 👉 快速失败：所以，大管家一查：哎哟，当前线程已经在造这个多例了？你又来要？直接抛异常斩断死循环！*/
 			// Fail if we're already creating this bean instance:
 			// We're assumably within a circular reference.
 			if (isPrototypeCurrentlyInCreation(beanName)) {
 				throw new BeanCurrentlyInCreationException(beanName);
 			}
 
+			/* 🏢【动作 6：安检门二 (向上级总公司甩锅！)】 Spring 思想：双亲委派机制的变体（容器层级隔离）。
+			 * 看看当前工厂有没有“爹”(比如 SpringMVC 容器的爹是 Spring Root 容器)。 如果有爹，而且咱们自己的档案馆里居然【没有】这个 Bean 的图纸！👉 甩手掌柜：说明活儿不归我管！根据参数精细度，把任务原封不动踢给父工厂去干！*/
 			// Check if bean definition exists in this factory.
 			BeanFactory parentBeanFactory = getParentBeanFactory();
+			// 如果有爹，而且咱们自己的图纸档案馆里，居然【没有】这个 Bean 的图纸（BeanDefinition）！
 			if (parentBeanFactory != null && !containsBeanDefinition(beanName)) {
+				// 🤷‍♂️ 那说明这活儿根本不归我管！还原客户最初喊的名字（带上 & 等前缀）。
 				// Not found -> check parent.
 				String nameToLookup = originalBeanName(name);
+				// 下面四个分支，根据参数的精细度，把任务【原封不动地踢给父工厂】去干！大管家当甩手掌柜！
 				if (parentBeanFactory instanceof AbstractBeanFactory) {
 					return ((AbstractBeanFactory) parentBeanFactory).doGetBean(
 							nameToLookup, requiredType, args, typeCheckOnly);
@@ -297,29 +453,42 @@ public abstract class AbstractBeanFactory extends FactoryBeanRegistrySupport imp
 				}
 			}
 
+			/* 🔒【动作 7：冻结图纸，准备施工】
+			 * 如果不是闹着玩 (查类型) 而是真要提货，把机器打上“已排入生产线”的标记。 此时该 Bean 的图纸配置将被彻底冻结，严禁其他线程再去修改它的属性！(Spring 思想：并发安全) */
 			if (!typeCheckOnly) {
+				// 把这台机器打上“已排入生产线”的标记。
 				markBeanAsCreated(beanName);
 			}
 
+/* ================================================ 📜 第三幕：合成终极蓝图 & 摆平“傲娇”的前置依赖 ================================================ */
+			// ⏱️【性能监控打点】：给外部的监控器（如 Actuator）发信号：我要开始造这台机器了。
 			StartupStep beanCreation = this.applicationStartup.start("spring.beans.instantiate")
 					.tag("beanName", name);
 			try {
 				if (requiredType != null) {
 					beanCreation.tag("beanType", requiredType::toString);
 				}
+				/* 🧬【动作 8：父子基因融合 (图纸合并)】Spring 思想：配置复用。
+				 * 如果你在 XML 或注解里写了 parent="baseUser"，这里会把父类的公共属性全部复制下来，和当前属性合并，生成一张包含所有细节的“终极蓝图”（RootBeanDefinition）。*/
 				RootBeanDefinition mbd = getMergedLocalBeanDefinition(beanName);
+				// 检查图纸合法性（比如如果是 abstract 抽象的图纸，直接报错不能实例化）
 				checkMergedBeanDefinition(mbd, beanName, args);
 
+				/*  😠【动作 9：摆平傲娇的强依赖 (解析 @DependsOn)】
+				 * 有些机器很傲娇：“你想造我？必须先去把数据库连接池造好！” */
 				// Guarantee initialization of beans that the current bean depends on.
 				String[] dependsOn = mbd.getDependsOn();
 				if (dependsOn != null) {
 					for (String dep : dependsOn) {
+						// 💥【死锁检测】：如果你等我，我又等你（A @DependsOn B，B @DependsOn A）。 发现互相等待，立马抛异常！绝不让工厂死锁停工！
 						if (isDependent(beanName, dep)) {
 							throw new BeanCreationException(mbd.getResourceDescription(), beanName,
 									"Circular depends-on relationship between '" + beanName + "' and '" + dep + "'");
 						}
+						// 📝【登记在册】：为了将来工厂倒闭时，先销毁 A，再销毁 B，保证优雅停机。
 						registerDependentBean(dep, beanName);
 						try {
+							// 🚀【插队造机器】：放下手里的活，递归调用 getBean()，强行先去把被依赖的祖宗造出来！
 							getBean(dep);
 						}
 						catch (NoSuchBeanDefinitionException ex) {
@@ -329,13 +498,22 @@ public abstract class AbstractBeanFactory extends FactoryBeanRegistrySupport imp
 					}
 				}
 
+/* ================================================ 🔨 第四幕：三大生产车间与“延迟调用”的终极艺术  ================================================
+ * 图纸有了，前置依赖搞定了，真正送入车间！这是 Spring 针对**不同生命周期作用域（Scope）**的分发中心。*/
+
+				/* 🏭【一号车间：单例车间 (Singleton)】—— 99% 的对象都在这造！*/
 				// Create bean instance.
 				if (mbd.isSingleton()) {
+					/* 💡【动作 10：延迟调用的艺术 (Lambda)】
+					 * 注意！这里没有直接造对象，而是传了一个 () -> { return createBean(...) } 的 ObjectFactory 给 getSingleton！
+					 * Spring 思想：控制反转中的反转。大管家不亲自造，他把“怎么造”的说明书包在 Lambda 里，交给单例池管理器去执行。 单例池管理器在执行前后，可以从容地做各种加锁、加三级缓存的动作！*/
 					sharedInstance = getSingleton(beanName, () -> {
 						try {
+							// 💥💥💥 血肉工厂的真正入口：createBean！  这里面包含了：推断构造方法、反射实例化、@Autowired 依赖注入、@PostConstruct 初始化方法调用！
 							return createBean(beanName, mbd, args);
 						}
 						catch (BeansException ex) {
+							// 🧹 打扫战场：如果造的过程中机器炸了，赶紧把它从各级缓存里清空，不能留下有害垃圾。
 							// Explicitly remove instance from singleton cache: It might have been put there
 							// eagerly by the creation process, to allow for circular reference resolution.
 							// Also remove any beans that received a temporary reference to the bean.
@@ -343,32 +521,42 @@ public abstract class AbstractBeanFactory extends FactoryBeanRegistrySupport imp
 							throw ex;
 						}
 					});
+					// 📦 再次拆盲盒：处理 FactoryBean
 					beanInstance = getObjectForBeanInstance(sharedInstance, name, beanName, mbd);
 				}
 
+				/*  🏭【二号车间：多例车间 (Prototype)】—— 不进缓存，每次都现场造新的！ */
 				else if (mbd.isPrototype()) {
 					// It's a prototype -> create a new instance.
 					Object prototypeInstance = null;
 					try {
+						// 挂上免战牌：在 ThreadLocal 记录当前线程正在造多例 (配合上面的防爆防死循环机制)
 						beforePrototypeCreation(beanName);
+						// 💥 现场开机，纯手工新造一个！
 						prototypeInstance = createBean(beanName, mbd, args);
 					}
 					finally {
+						// 摘下免战牌
 						afterPrototypeCreation(beanName);
 					}
+					// 📦 拆盲盒
 					beanInstance = getObjectForBeanInstance(prototypeInstance, name, beanName, mbd);
 				}
 
+				/* 🏭【三号车间：自定义作用域车间 (如 Web 的 Request/Session)】*/
 				else {
+					// 拿到这台机器要求的作用域名称
 					String scopeName = mbd.getScope();
 					if (!StringUtils.hasLength(scopeName)) {
 						throw new IllegalStateException("No scope name defined for bean '" + beanName + "'");
 					}
+					// 去找工厂里注册的对应“区域管理员”（比如 Session 管理员）
 					Scope scope = this.scopes.get(scopeName);
 					if (scope == null) {
 						throw new IllegalStateException("No Scope registered for scope name '" + scopeName + "'");
 					}
 					try {
+						// 🤝 委托管理：大管家把 Lambda (造机说明书) 扔给 Session 管理员。  管理员自己决定：是去用户 Session 里拿旧的？还是调说明书现场造一个新的塞进 Session 里？
 						Object scopedInstance = scope.get(beanName, () -> {
 							beforePrototypeCreation(beanName);
 							try {
@@ -378,6 +566,7 @@ public abstract class AbstractBeanFactory extends FactoryBeanRegistrySupport imp
 								afterPrototypeCreation(beanName);
 							}
 						});
+						// 📦 拆盲盒
 						beanInstance = getObjectForBeanInstance(scopedInstance, name, beanName, mbd);
 					}
 					catch (IllegalStateException ex) {
@@ -386,17 +575,34 @@ public abstract class AbstractBeanFactory extends FactoryBeanRegistrySupport imp
 				}
 			}
 			catch (BeansException ex) {
+				// 🚨 如果造机器途中抛了任何异常，在日志上打上标签，清理残留状态，然后往上抛
 				beanCreation.tag("exception", ex.getClass().toString());
 				beanCreation.tag("message", String.valueOf(ex.getMessage()));
 				cleanupAfterBeanCreationFailure(beanName);
 				throw ex;
 			}
 			finally {
+				// 🏁 结束性能打点
 				beanCreation.end();
 			}
 		}
 
+/* ======================================   🎀 第五幕：出厂前的终极质检 (适配与交付) ======================================
+ * 机器造出来了，离开车间交到客户手里的最后一步！ */
+		/* 🛂【动作 11：类型强转与适配质检】
+		 * 假设客户（业务代码）要提货的是一个 Interface 接口类型，但车间造出来的是个实现类。adaptBeanInstance 会拿出“通用翻译部（ConversionService）”看看能不能转换过去。
+		 * 如果客户要一个 String，你造了个 Integer，而且翻译部也翻译不了，直接抛出 BeanNotOfRequiredTypeException，当场销毁，残次品绝不准流向客户！ */
 		return adaptBeanInstance(name, beanInstance, requiredType);
+/*
+ * ====================================== 💡 [厂长总结：上帝视角的《设计模式》狂欢] ======================================
+ * 这段 doGetBean 实际上是一场完美的设计模式教学：
+ * 1. 模板方法模式：规定了找缓存、找父类、合并图纸、创建实例的死骨架。
+ * 2. 工厂/策略模式：根据 Scope 不同，分发给不同的策略执行。
+ * 3. 责任链与委派：找不到就扔给父容器 (双亲委派精髓)。
+ * 4. 装饰器/代理模式：隐藏在 getObjectForBeanInstance 中。
+ * 5. 真正的脏活累活全被它极其优雅地推给了 getSingleton() (三级缓存) 和 createBean() (生命周期)。
+ * 这才是顶级架构师写出的骨架代码！
+ */
 	}
 
 	@SuppressWarnings("unchecked")
@@ -954,6 +1160,26 @@ public abstract class AbstractBeanFactory extends FactoryBeanRegistrySupport imp
 	}
 
 	/**
+	 * <h3>🚪 第四部分：批量入职与强制排队 (安全合规)</h3>
+	 * <p>
+	 * 终于，我们回到了供外界调用的大门。这里展示了人事经理是如何安排特种兵“插队”并保证绝对安全的。
+	 * </p>
+	 *
+	 * <h4>🛠️ 架构师视角的原理解析：</h4>
+	 * <ul>
+	 * <li><b>并发安全：</b>拿到大门锁 {@code synchronized (this.beanPostProcessors)}。当大量质检员并发入场时，必须严格排队，防止乱套。</li>
+	 * <li><b>位置铁律 (踢出旧记录)：</b>先调用 {@code removeAll}。如果你以前在花名册里，现在先把你踢出去。此时会触发底层报警器，大黑板（缓存）被擦除！</li>
+	 * <li><b>末尾追加 (重排队尾)：</b>调用 {@code addAll}，把你放在队伍的绝对末尾。再次触发报警器，大黑板再次被擦除！</li>
+	 * </ul>
+	 *
+	 * <blockquote>
+	 * <b>📢 [车间大白话]</b><br>
+	 * 人事经理在大门口摆了一张桌子：“所有想插队的特种兵注意了！现在办理入职，以前登过记的记录全部作废！
+	 * 所有人全部给我排到当前队伍的<b>最末尾</b>！而且只要你们动了位置，我就把大黑板擦干净重写！”
+	 * </blockquote>
+	 * <br>
+	 * <hr>
+	 * <p><b>[Original Spring Documentation]</b></p>
 	 * Add new BeanPostProcessors that will get applied to beans created
 	 * by this factory. To be invoked during factory configuration.
 	 * @since 5.3
@@ -1011,6 +1237,19 @@ public abstract class AbstractBeanFactory extends FactoryBeanRegistrySupport imp
 		}
 	}
 
+	/*
+	 * 🧽 第二部分：触发警报，擦除黑板 (缓存失效机制)
+	 * ---------------------------------------------------------
+	 * [原理解析：安全与延迟失效 Lazy Invalidation]
+	 * 为什么加 synchronized 锁？因为 beanPostProcessorCache 缓存变量是多线程共享的（将来会有几百个并发请求同时来造 Bean），在此清空必须保证绝对安全，且锁对象
+	 * this.beanPostProcessors 与添加质检员的锁保持同一把！
+	 *
+	 * 为什么赋值为 null？这叫延迟失效 （Lazy Invalidation） 。Spring 非常聪明，名单变了它不立刻费力计算新缓存，而是
+	 * 一把火烧了旧缓存 (置为 null)。等下次线程真正需要时发现是 null 再去重新计算，极大节约性能！
+	 *
+	 * * [车间大白话] 花名册旁放着一块写满分类索引的“大黑板”。只要花名册进出过哪怕一个人，
+	 * 人事经理立马拿起黑板擦，把整个黑板擦得干干净净 (null)！坚决不让车间工人看到过期数据！
+	 */
 	private void resetBeanPostProcessorCache() {
 		synchronized (this.beanPostProcessors) {
 			this.beanPostProcessorCache = null;
@@ -1264,6 +1503,17 @@ public abstract class AbstractBeanFactory extends FactoryBeanRegistrySupport imp
 	//---------------------------------------------------------------------
 
 	/**
+	 * <h3>🕵️ transformedBeanName —— 名字标准化引擎（doGetBean 的第一道工序）</h3>
+	 * <p><b>🏭【撕下面具——不管你报的是外号还是带 & 前缀的特殊暗号，我都翻译成官方真名！】</b></p>
+	 * <p><b>【两步翻译】</b></p>
+	 * <ol>
+	 * <li>{@code BeanFactoryUtils.transformedBeanName(name)}：去掉所有前导 "&" 前缀（FactoryBean 解引用符号）。
+	 *     例如 "&&&myFactory" → "myFactory"</li>
+	 * <li>{@code canonicalName(stripped)}：通过 {@code SimpleAliasRegistry.canonicalName()} 递归解析别名链。
+	 *     例如 "userAlias" → "userService"</li>
+	 * </ol>
+	 * <p>最终得到的 beanName 是<b>干净的、标准的、内部注册用的规范名</b>，后续所有逻辑都基于它。</p>
+	 * <hr/>
 	 * Return the bean name, stripping out the factory dereference prefix if necessary,
 	 * and resolving aliases to canonical names.
 	 * @param name the user-specified name
@@ -1274,6 +1524,10 @@ public abstract class AbstractBeanFactory extends FactoryBeanRegistrySupport imp
 	}
 
 	/**
+	 * <h3>🔄 originalBeanName —— 还原带 & 前缀的原始名</h3>
+	 * <p>先标准化（去 & + 解别名），如果原名带 "&"，再把 "&" 加回去。
+	 * 用于向父容器委托时还原调用者的原始意图（"我要的是 FactoryBean 本体"）。</p>
+	 * <hr/>
 	 * Determine the original bean name, resolving locally defined aliases to canonical names.
 	 * @param name the user-specified name
 	 * @return the original bean name
@@ -1343,6 +1597,17 @@ public abstract class AbstractBeanFactory extends FactoryBeanRegistrySupport imp
 
 
 	/**
+	 * <h3>🧬 getMergedLocalBeanDefinition —— 父子图纸合并引擎（doGetBean 的第八道工序）</h3>
+	 * <p><b>🏭【把父辈图纸的公共属性全部继承下来，合成一张"终极蓝图"！】</b></p>
+	 * <p><b>【硬核释义】</b><br/>
+	 * 如果当前 Bean 的 BeanDefinition 有 parent（例如 XML 中 {@code parent="baseService"}），
+	 * 这个方法会把父级 BD 的属性（scope、lazy-init、autowire-mode 等）全部复制下来，
+	 * 再用子级 BD 的属性覆盖，最终生成一个包含所有配置的 {@code RootBeanDefinition}。</p>
+	 * <p><b>【缓存策略】</b><br/>
+	 * 合并后的 BD 缓存在 {@code mergedBeanDefinitions}（ConcurrentHashMap）中。
+	 * 第一次查快速无锁读（get + stale 检查），未命中才加锁合并。
+	 * 当 BD 被修改时（如 BFPP 改了属性），通过 {@code stale=true} 标记失效，下次重新合并。</p>
+	 * <hr/>
 	 * Return a merged RootBeanDefinition, traversing the parent bean definition
 	 * if the specified bean corresponds to a child bean definition.
 	 * @param beanName the name of the bean to retrieve the merged definition for
@@ -1849,6 +2114,35 @@ public abstract class AbstractBeanFactory extends FactoryBeanRegistrySupport imp
 	}
 
 	/**
+	 * <h3>🔥 厂长驾到！FactoryBean 暗黑科技提货实况 💥</h3>
+	 * <h4>【架构巅峰】AbstractBeanFactory#getObjectForBeanInstance 源码精读</h4>
+	 * <p>报告厂长！您对这段核心腹地代码的嗅觉简直是<b>降维打击</b>！这可是整个超级工厂最容易让人迷失的“玄机枢纽”。
+	 * 普通开发者看到这里直接被绕晕，而您直接揪出了隐藏在厂房深处的 <b>“厂中厂 / 专门造机器的机器 (FactoryBean)”</b>！</p>
+	 *
+	 * <ul>
+	 * <li><b>核心仓库位置：</b> AbstractBeanFactory 提货出口</li>
+	 * <li><b>主要嫌疑人：</b> beanInstance (可能是普通机器，也可能是 3D 打印机)</li>
+	 * <li><b>厂长指令符号：</b> '&' (解引用前缀，代表“我不要产品，把打印机给我搬上车！”)</li>
+	 * </ul>
+	 *
+	 * <blockquote>
+	 * <b>【大管家的终极提货确认书】</b><br/>
+	 * 厂长拿着提货单站在提货处。大管家看着眼前已经拉出来的机器，发出灵魂拷问：<br/>
+	 * “您要是带了 '&' 标识，我就把这台【3D打印机（FactoryBean）】本尊给您；<br/>
+	 * 要是没带 '&'，且它真是一台打印机，那我就当场通电，把【打印出来的神秘产物】交给您！”
+	 *
+	 * 其实就是: 您到底是想要这台【3D打印机（FactoryBean）】本尊？还是想要它【打印出来的产物】？！” 💥
+	 * </blockquote>
+	 *
+	 * @param beanInstance 已经实例化好的机器（可能是普通机器，也可能是 FactoryBean）
+	 * @param name 厂长提交的提货单名字（可能带有 '&' 前缀）
+	 * @param beanName 机器的官方注册名（去除了 '&' 等修饰符）
+	 * @param mbd 机器的制造图纸 / 蓝图 (MergedBeanDefinition)
+	 * @return 最终交付给厂长的机器（普通机器本尊、3D打印机本尊，或3D打印机造出来的产物）
+	 *
+	 * <br>
+	 * <hr>
+	 * <p><b>[Original Spring Documentation]</b></p>
 	 * Get the object for the given bean instance, either the bean
 	 * instance itself or its created object in case of a FactoryBean.
 	 * @param beanInstance the shared bean instance
@@ -1859,21 +2153,36 @@ public abstract class AbstractBeanFactory extends FactoryBeanRegistrySupport imp
 	 */
 	protected Object getObjectForBeanInstance(
 			Object beanInstance, String name, String beanName, @Nullable RootBeanDefinition mbd) {
-
+/* ============================== 💥 第一幕：厂长特权符号 '&' 的拦截与身份核验 (提货单带了 '&' 的情况) ============================== */
+		/* [架构师视角] BeanFactoryUtils.isFactoryDereference 判断传入的 name 是否以 '&' 开头。'&' 是 Spring 核心解引用符号，专门用于获取 FactoryBean 实例本身，而非其 getObject() 返回的产物。
+		 * [动作拆解] 大管家拿着放大镜核对提货单：哎哟！厂长的提货名字带了 '&' 前缀！ 这说明厂长今天不要流水线产品，就要提走那台【专门造机器的机器】本尊！ */
 		// Don't let calling code try to dereference the factory if the bean isn't a factory.
 		if (BeanFactoryUtils.isFactoryDereference(name)) {
+			/* [动作拆解] 如果是厂里特殊的“空气机器”（NullBean），没啥好说的，直接把空气给您打包带走。
+			 * [原理解析] NullBean 是 Spring 内部用来表示 null 值的特殊标记对象。 */
 			if (beanInstance instanceof NullBean) {
 				return beanInstance;
 			}
+
+			/*  🚨 [致命瓶颈] 快速失败机制 (Fail-Fast)
+			 * [架构师视角] 严格类型校验：如果 name 包含 '&'，但实际 beanInstance 并未实现 FactoryBean 接口，直接抛出异常，防止状态逃逸。
+			 * [动作拆解] 警报拉响！厂长提货单带了 '&' 说要提 3D打印机，但大管家一看，眼前这玩意儿就是个普通的拖拉机（不是FactoryBean）！大管家当场掀桌子报错！ */
 			if (!(beanInstance instanceof FactoryBean)) {
 				throw new BeanIsNotAFactoryException(beanName, beanInstance.getClass());
 			}
 			if (mbd != null) {
+				/* [原理解析] 如果合并后的 BeanDefinition 蓝图存在，将其标记为 FactoryBean。
+				 * [动作拆解] 确认无误，大管家拿出这台机器的生产图纸（mbd）, 在上面盖个大红戳：“确认是厂中厂”！
+				 */
 				mbd.isFactoryBean = true;
 			}
+			// 第一幕收工：恭恭敬敬把 3D 打印机本尊递给厂长
 			return beanInstance;
 		}
 
+/* ============================== 🚀 第二幕：普通机器的绿色通道 (提货单没带 '&'，且机器是普通 Bean) ============================== */
+		/*  [架构师视角] 此时 name 不带 '&'。接着判断 beanInstance 是否为 FactoryBean。如果不是，说明这是一个普通的 Spring Bean，直接返回实例即可。
+		 * [动作拆解] 提货单没带 '&'，大管家踢了一脚眼前的机器，发现根本不是 3D打印机 （!(beanInstance instanceof FactoryBean)）。嗨！那这就只是一台普通水泵/拖拉机嘛，厂长要的就是它，打开绿色通道，直接放行出厂！*/
 		// Now we have the bean instance, which may be a normal bean or a FactoryBean.
 		// If it's a FactoryBean, we use it to create a bean instance, unless the
 		// caller actually wants a reference to the factory.
@@ -1881,24 +2190,52 @@ public abstract class AbstractBeanFactory extends FactoryBeanRegistrySupport imp
 			return beanInstance;
 		}
 
+/* ============================== 🔥 第三幕：核心变戏法！拉下总电闸，启动 3D打印机，索要制造产物！============================== */
+		/* [动作拆解] 能走到这行，说明：厂长没写 '&'，但眼前的机器偏偏是一台 3D打印机！ 大管家心领神会：厂长是来拿这台打印机【吐出来的最终产品】的！开机，造物！ */
 		Object object = null;
 		if (mbd != null) {
+			// 【车间大白话】图纸在手，盖个戳：“这家伙是3D打印机”。
 			mbd.isFactoryBean = true;
 		}
 		else {
+			/* [架构师视角] 从 factoryBeanObjectCache 缓存中尝试获取已生产的单例对象，提升性能。
+			 * [动作拆解] 图纸不在手边？没事！大管家先去【厂中厂现货小仓库】里找找，看这台 3D打印机 以前是不是已经打印过这个产品了。  */
 			object = getCachedObjectForFactoryBean(beanName);
 		}
+		/* [动作拆解] 现货小仓库里没货（或者它是多例）！没办法，只能当场通电，让 3D打印机 现场干活！强制给机器换上 FactoryBean 的工作服！  */
 		if (object == null) {
+			// 【车间大白话】把刚才那台机器强制换上 `FactoryBean` 的工作服！
 			// Return bean instance from factory.
 			FactoryBean<?> factory = (FactoryBean<?>) beanInstance;
+			/* [原理解析] 防御性编程，如果当前没有 mbd 且包含该 bean 的定义，则重新获取一次 MergedBeanDefinition，确保拿到最新的图纸。
+			 * [车间大白话] 确认一下图纸。如果要现场打印，大管家总得核对一下这台打印机的原始图纸到底是怎么画的。 */
 			// Caches object obtained from FactoryBean if it is a singleton.
 			if (mbd == null && containsBeanDefinition(beanName)) {
 				mbd = getMergedLocalBeanDefinition(beanName);
 			}
+
+			/* [架构师视角] 检查 该 bean 的 BeanDefinition 是否被标记为 synthetic (合成的)。 合成的 bean 通常由框架内部注册，不会经过常规 BeanPostProcessor 的拦截处理。
+			 * [动作拆解] 看看图纸上有没有标注这是“厂里内部用的临时工具”。 如果不是，待会儿打印出来后，必须得让咱们的【流水线质检员（BeanPostProcessor）】狠狠地检查和加工一番！*/
 			boolean synthetic = (mbd != null && mbd.isSynthetic());
+			/* [🌟 终极核爆点 🌟]  终极委托与对象加工
+			 * [架构师视角] 调用 getObjectFromFactoryBean，进入生产和后置处理流程（包含 AOP 代理创建等关键逻辑） 内部会调用 factory.getObject()， 并应用 BeanPostProcessor。
+			 * [动作拆解] 电闸拉下！大管家把 3D打印机、机器名字、以及是否需要质检员加工的指令，一股脑塞进另外一条专属流水线！ 轰隆隆... 3D打印机疯狂运转，最终吐出了厂长真正想要的那个【神奇产品】！*/
 			object = getObjectFromFactoryBean(factory, beanName, !synthetic);
 		}
+		// 提货完毕，产品交接！厂长，您的货，请拿好！
 		return object;
+
+/*
+📊 【战略复盘：超级工厂顶级架构思想】
+1. 厂长，这段代码看似只有几个 if-else，但它完美诠释了 Spring 底层的两大核心设计美学：
+策略分流与快速失败 (Fail-Fast)：前置处理极度严谨。你要什么（有没有 &），我有什么（是不是 FactoryBean），一旦发现你要求不匹配（有 & 但不是 FactoryBean），当场抛异常！绝不带着错误继续往下走！
+
+2. 代理与装饰器思维的萌芽 (FactoryBean 模式)：Spring 把“对象创建的复杂度”巧妙地封装到了 FactoryBean 这个黑盒里。
+如果你想集成第三方组件（比如 MyBatis 的 SqlSessionFactory），Spring 本身不需要懂 MyBatis，它只需要给你一个 SqlSessionFactoryBean，让你自己在里面写逻辑。大管家只负责：发现它是打印机 -> 找它要东西 -> 缓存东西。 这种解耦，堪称神作！
+
+3. 3D打印机（FactoryBean）现在虽然通电了，但它到底是怎么吐出产品的？它吐出产品之后，流水线质检员（BeanPostProcessor）
+又是怎么在这个产品上疯狂打补丁（比如生成 AOP 动态代理）的？这里面隐藏着 Spring 初始化的巨大秘密！ 强攻兵工厂腹地！深入看一眼刚才最后一行调用的 getObjectFromFactoryBean(...)，看看 3D 打印机生产全流程，以及质检员是如何在产物上“动手动脚”的！
+*/
 	}
 
 	/**
@@ -1967,6 +2304,12 @@ public abstract class AbstractBeanFactory extends FactoryBeanRegistrySupport imp
 	//---------------------------------------------------------------------
 
 	/**
+	 * <h3>📋 抽象钩子 1：containsBeanDefinition —— "图纸档案馆里有没有这张图纸？"</h3>
+	 * <p><b>🏭【模板方法的变化点——图纸在哪里存着，由子类决定！】</b></p>
+	 * <p>在 doGetBean 的"向上甩锅"逻辑中被调用：如果本厂图纸档案馆没有这个 beanName 的图纸，
+	 * 就把活甩给父工厂。</p>
+	 * <p><b>【实现者】</b>{@code DefaultListableBeanFactory} → 直接查内存 Map {@code beanDefinitionMap.containsKey(beanName)}，O(1)。</p>
+	 * <hr/>
 	 * Check if this bean factory contains a bean definition with the given name.
 	 * Does not consider any hierarchy this factory may participate in.
 	 * Invoked by {@code containsBean} when no cached singleton instance is found.
@@ -1984,6 +2327,16 @@ public abstract class AbstractBeanFactory extends FactoryBeanRegistrySupport imp
 	protected abstract boolean containsBeanDefinition(String beanName);
 
 	/**
+	 * <h3>📜 抽象钩子 2：getBeanDefinition —— "把这个 Bean 的图纸给我拿来！"</h3>
+	 * <p><b>🏭【模板方法的核心变化点之一——图纸从哪里来，由子类决定！】</b></p>
+	 * <p>这是模板方法模式中两大核心钩子之一（另一个是 createBean）。<br/>
+	 * 在 {@code getMergedLocalBeanDefinition()} 中被调用，用于获取原始 BeanDefinition 以进行父子合并。</p>
+	 * <p><b>【设计精髓】</b><br/>
+	 * AbstractBeanFactory 故意不假设图纸的存储方式——可以是内存 Map（DefaultListableBeanFactory），
+	 * 也可以是远程配置中心、数据库、甚至文件系统。这就是为什么原始 Javadoc 说
+	 * "this operation might be expensive"——架构师为昂贵的图纸查找场景留了后路。</p>
+	 * <p><b>【实现者】</b>{@code DefaultListableBeanFactory} → {@code beanDefinitionMap.get(beanName)}。</p>
+	 * <hr/>
 	 * Return the bean definition for the given bean name.
 	 * Subclasses should normally implement caching, as this method is invoked
 	 * by this class every time bean definition metadata is needed.
@@ -2005,6 +2358,23 @@ public abstract class AbstractBeanFactory extends FactoryBeanRegistrySupport imp
 	protected abstract BeanDefinition getBeanDefinition(String beanName) throws BeansException;
 
 	/**
+	 * <h3>🔨 抽象钩子 3：createBean —— "照着图纸，把这台机器给我造出来！"</h3>
+	 * <p><b>🏭【模板方法的核心变化点之二——怎么造 Bean，由子类决定！】</b></p>
+	 * <p>这是整个 Spring IoC 容器最核心的扩展点，没有之一。<br/>
+	 * doGetBean 的流程骨架在调用 {@code getSingleton(beanName, () -> createBean(...))} 时，
+	 * 把"怎么造"的全部细节委托给了这个抽象方法。</p>
+	 * <p><b>【实现者】</b>{@code AbstractAutowireCapableBeanFactory.createBean()}，内部包含：</p>
+	 * <ol>
+	 * <li>推断构造器（determineConstructorsFromBeanPostProcessors）</li>
+	 * <li>反射实例化（instantiateBean / autowireConstructor）</li>
+	 * <li>提前暴露到三级缓存（addSingletonFactory + getEarlyBeanReference）</li>
+	 * <li>属性填充/依赖注入（populateBean）</li>
+	 * <li>初始化回调（initializeBean → Aware → BPP.before → afterPropertiesSet → BPP.after）</li>
+	 * </ol>
+	 * <p><b>【与 getBeanDefinition 的对称性】</b><br/>
+	 * getBeanDefinition 回答"图纸在哪"，createBean 回答"怎么造"——
+	 * 这两个抽象方法构成了模板方法模式的完整变化点集合，让 AbstractBeanFactory 的流程骨架永远不需要修改。</p>
+	 * <hr/>
 	 * Create a bean instance for the given merged bean definition (and arguments).
 	 * The bean definition will already have been merged with the parent definition
 	 * in case of a child definition.
@@ -2020,36 +2390,55 @@ public abstract class AbstractBeanFactory extends FactoryBeanRegistrySupport imp
 
 
 	/**
+	 * <h3>架构巅峰：空间换时间与缓存失效的艺术 🧲</h3>
+	 * <p>
+	 * 这是 Spring 5.3 版本为了极致压榨性能而引入的神级设计！它完美地展示了在极高频的并发读取场景下，
+	 * 如何用<b>“空间换时间”</b>加上<b>“写时使缓存失效 (Cache Invalidation on Write)”</b>的精妙战术。
+	 * </p>
+	 *
+	 * <br>
+	 * <hr>
+	 * <p><b>[Original Spring Documentation]</b></p>
 	 * CopyOnWriteArrayList which resets the beanPostProcessorCache field on modification.
 	 *
 	 * @since 5.3
 	 */
 	private class BeanPostProcessorCacheAwareList extends CopyOnWriteArrayList<BeanPostProcessor> {
 
+		/*
+		 * 🗂️ 第一部分：自带“报警器”的定制花名册
+		 * ---------------------------------------------------------
+		 * [原理解析] Spring 5.2 及以前使用原生 CopyOnWriteArrayList，但原生集合不知道自己里面存的是什么，也无法在数据变动时通知别人。
+		 * 所以 Spring 5.3 专门写了这个内部类 BeanPostProcessorCacheAwareList（具有缓存感知能力的写时复制列表）。
+		 * [车间大白话] 这本花名册被安装了“物理防盗警报器”。你翻看(读)它没问题，速度极快且不用加锁；
+		 * 但只要人事部对它进行了任何修改(写操作，哪怕是改一个字 set，或开除一人 remove)，
+		 * 警报器就会瞬间触发，强制调用核心咒语：resetBeanPostProcessorCache()！
+		 */
+
 		@Override
 		public BeanPostProcessor set(int index, BeanPostProcessor element) {
 			BeanPostProcessor result = super.set(index, element);
-			resetBeanPostProcessorCache();
+			resetBeanPostProcessorCache(); // 💥 核心报警器！
 			return result;
 		}
 
 		@Override
 		public boolean add(BeanPostProcessor o) {
 			boolean success = super.add(o);
-			resetBeanPostProcessorCache();
+			resetBeanPostProcessorCache(); // 💥 核心报警器！
 			return success;
 		}
 
 		@Override
 		public void add(int index, BeanPostProcessor element) {
 			super.add(index, element);
-			resetBeanPostProcessorCache();
+			resetBeanPostProcessorCache(); // 💥 核心报警器！
 		}
 
 		@Override
 		public BeanPostProcessor remove(int index) {
 			BeanPostProcessor result = super.remove(index);
-			resetBeanPostProcessorCache();
+			resetBeanPostProcessorCache(); // 💥 核心报警器！
 			return result;
 		}
 
@@ -2057,7 +2446,7 @@ public abstract class AbstractBeanFactory extends FactoryBeanRegistrySupport imp
 		public boolean remove(Object o) {
 			boolean success = super.remove(o);
 			if (success) {
-				resetBeanPostProcessorCache();
+				resetBeanPostProcessorCache(); // 💥 核心报警器！
 			}
 			return success;
 		}
@@ -2066,7 +2455,7 @@ public abstract class AbstractBeanFactory extends FactoryBeanRegistrySupport imp
 		public boolean removeAll(Collection<?> c) {
 			boolean success = super.removeAll(c);
 			if (success) {
-				resetBeanPostProcessorCache();
+				resetBeanPostProcessorCache(); // 💥 核心报警器！
 			}
 			return success;
 		}
@@ -2075,7 +2464,7 @@ public abstract class AbstractBeanFactory extends FactoryBeanRegistrySupport imp
 		public boolean retainAll(Collection<?> c) {
 			boolean success = super.retainAll(c);
 			if (success) {
-				resetBeanPostProcessorCache();
+				resetBeanPostProcessorCache(); // 💥 核心报警器！
 			}
 			return success;
 		}
@@ -2084,7 +2473,7 @@ public abstract class AbstractBeanFactory extends FactoryBeanRegistrySupport imp
 		public boolean addAll(Collection<? extends BeanPostProcessor> c) {
 			boolean success = super.addAll(c);
 			if (success) {
-				resetBeanPostProcessorCache();
+				resetBeanPostProcessorCache(); // 💥 核心报警器！
 			}
 			return success;
 		}
@@ -2093,7 +2482,7 @@ public abstract class AbstractBeanFactory extends FactoryBeanRegistrySupport imp
 		public boolean addAll(int index, Collection<? extends BeanPostProcessor> c) {
 			boolean success = super.addAll(index, c);
 			if (success) {
-				resetBeanPostProcessorCache();
+				resetBeanPostProcessorCache(); // 💥 核心报警器！
 			}
 			return success;
 		}
@@ -2102,7 +2491,7 @@ public abstract class AbstractBeanFactory extends FactoryBeanRegistrySupport imp
 		public boolean removeIf(Predicate<? super BeanPostProcessor> filter) {
 			boolean success = super.removeIf(filter);
 			if (success) {
-				resetBeanPostProcessorCache();
+				resetBeanPostProcessorCache(); // 💥 核心报警器！
 			}
 			return success;
 		}
@@ -2110,24 +2499,52 @@ public abstract class AbstractBeanFactory extends FactoryBeanRegistrySupport imp
 		@Override
 		public void replaceAll(UnaryOperator<BeanPostProcessor> operator) {
 			super.replaceAll(operator);
-			resetBeanPostProcessorCache();
+			resetBeanPostProcessorCache(); // 💥 核心报警器！
 		}
 	}
 
 
 	/**
+	 * <h3>🗄️ 第三部分：揭秘“大黑板”的真容 (为什么非要搞缓存？) ️</h3>
+	 * <p>
+	 * 这是整段优化的<b>灵魂所在</b>！为什么要辛辛苦苦维护这个 {@code BeanPostProcessorCache}？
+	 * 答案是：用空间换时间，彻底消灭运行时的高频 {@code instanceof} 判断！
+	 * </p>
+	 *
+	 * <h4>🚨 性能瓶颈的真相：</h4>
+	 * <p>
+	 * 厂里虽然有几十个普通的质检员，但他们是有细分兵种的！造一个单例 Bean 需要经历找构造、实例化、
+	 * 属性注入、初始化、销毁等繁琐阶段。如果在每个阶段，Spring 都要去全量遍历那几十个质检员，
+	 * 用 {@code instanceof} 问：“你是负责销毁的吗？”<br>
+	 * 假设造 10 万个 Bean，这就是<b>几百万次的 {@code instanceof} 判断</b>！这是极其灾难的性能损耗！
+	 * </p>
+	 *
+	 * <blockquote>
+	 * <b>📢 [车间大白话：大黑板的 VIP 快速通道]</b><br>
+	 * 为提升造机器的速度，人事经理设计了这块“大黑板”。它把平时混在一起的质检员，按技能提前分到了 <b>4 个专属 VIP 通道</b>！<br>
+	 * 👉 需要找构造函数？直接去 {@code smartInstantiationAware} 小分队！<br>
+	 * 👉 需要注入 {@code @Autowired}？直接去 {@code mergedDefinition} 找咱们的【元老 2】！<br>
+	 * <b>通过一次性的缓存分组，彻底消灭了运行期间无数次的类型判断！这才是 Spring 启动和运行能快如闪电的终极秘密！</b>
+	 * </blockquote>
+	 *
+	 * <br>
+	 * <hr>
+	 * <p><b>[Original Spring Documentation]</b></p>
 	 * Internal cache of pre-filtered post-processors.
 	 *
 	 * @since 5.3
 	 */
 	static class BeanPostProcessorCache {
-
+		// 1. 负责在对象实例化（new）之前/之后拦截的特种兵
 		final List<InstantiationAwareBeanPostProcessor> instantiationAware = new ArrayList<>();
 
+		// 2. 负责决定对象该用哪个构造函数的智能特种兵
 		final List<SmartInstantiationAwareBeanPostProcessor> smartInstantiationAware = new ArrayList<>();
 
+		// 3. 负责在对象被销毁前执行扫尾工作（如 @PreDestroy）的特种兵
 		final List<DestructionAwareBeanPostProcessor> destructionAware = new ArrayList<>();
 
+		// 4. 负责在实例化后立刻修改/合并图纸（如 @Autowired 属性解析）的特种兵
 		final List<MergedBeanDefinitionPostProcessor> mergedDefinition = new ArrayList<>();
 	}
 

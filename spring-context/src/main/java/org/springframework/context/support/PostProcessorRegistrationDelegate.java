@@ -44,6 +44,61 @@ import org.springframework.core.metrics.StartupStep;
 import org.springframework.lang.Nullable;
 
 /**
+ * <h1>🗺️ 一、架构坐标·全局定位</h1>
+ * <h2>AbstractApplicationContext 的"后处理器调度室"——BFPP/BPP 执行顺序的铁腕守护者！</h2>
+ * <ul>
+ * <li><b>全限定名</b>：{@code org.springframework.context.support.PostProcessorRegistrationDelegate}</li>
+ * <li><b>中文名</b>：后处理器注册委托 —— refresh 中 invokeBFPP + registerBPP 两步的"调度室主任"</li>
+ * <li><b>所属车间 🏭</b>：{@code spring-context} 模块的 support 包（注意！support 包 = 抽象骨架的具体实现！
+ * AbstractApplicationContext 在此包中定义了 refresh 的 12 步骨架，
+ * 但其中 invokeBeanFactoryPostProcessors 和 registerBeanPostProcessors 这两步的<b>具体调度逻辑</b>
+ * 太过复杂（严格的排序、分批执行、防止过早实例化），所以被抽到本类中作为静态委托方法。
+ * 一句话：<b>本类是 refresh 第 5 步和第 6 步的"执行细节"所在地！</b>）</li>
+ * <li><b>类性质</b>：{@code final} 包级可见类，私有构造器——纯静态工具委托，不可实例化、不可继承</li>
+ * </ul>
+ *
+ * <h3>💡 为什么需要这个委托类？——执行顺序太关键，必须独立管控！</h3>
+ * <p>refresh 的第 5 步（invokeBeanFactoryPostProcessors）和第 6 步（registerBeanPostProcessors）
+ * 涉及<b>极其严格的执行顺序</b>：</p>
+ * <ul>
+ * <li><b>BDRPP 必须先于 BFPP</b>：图纸还没画完，审核员不能提前上场</li>
+ * <li><b>PriorityOrdered 必须先于 Ordered，Ordered 必须先于普通</b>：三级优先级分批执行</li>
+ * <li><b>每批执行前必须重新查询 beanNames</b>：因为前一批 BDRPP 可能注册了新的 BDRPP</li>
+ * <li><b>BPP 也分四批注册</b>：PriorityOrdered → Ordered → 普通 → MergedBeanDefinitionPostProcessor（内部）</li>
+ * </ul>
+ * <p>这些排序规则如果写在 AbstractApplicationContext 里会让那个类更加臃肿。
+ * 所以 Spring 用委托模式把这段"最经典也最不能碰"的代码独立出来——
+ * <b>官方甚至在源码中写了 WARNING 注释，警告不要随意重构这段代码！</b></p>
+ *
+ * <h3>🧬 两大核心方法</h3>
+ * <table border="1" cellpadding="5" cellspacing="0">
+ * <tr><th>方法</th><th>对应 refresh 步骤</th><th>核心职责</th></tr>
+ * <tr><td><b>invokeBeanFactoryPostProcessors()</b></td><td>第 5 步</td>
+ *     <td>按优先级分批执行 BDRPP（三轮）+ BFPP（三轮），完成"图纸大爆发 + 图纸属性修改"</td></tr>
+ * <tr><td><b>registerBeanPostProcessors()</b></td><td>第 6 步</td>
+ *     <td>按优先级分四批注册 BPP 到 BeanFactory，为后续 Bean 创建安排好"质检员"</td></tr>
+ * </table>
+ *
+ * <h3>🧬 设计精髓——你的业务能偷师什么？</h3>
+ * <ol>
+ * <li><b>"委托模式"分离复杂逻辑</b><br/>
+ * 当一个类的某个方法实现过于复杂时，不要让它撑爆宿主类。
+ * 抽到独立的 Delegate 类中，让宿主类保持清爽。<br/>
+ * <b>业务借鉴</b>：你的 Service 中某个方法逻辑太长？抽到 XxxDelegate 或 XxxHelper 中。</li>
+ *
+ * <li><b>"分批 + 重查"的动态发现机制</b><br/>
+ * 每批 BDRPP 执行后都会重新查询 beanNames，因为上一批可能注册了新的处理器。
+ * 这种"执行→查询→再执行"的循环保证了动态注册的处理器不会被遗漏。</li>
+ * </ol>
+ *
+ * <h3>🎯 三、战略复盘</h3>
+ * <p>PostProcessorRegistrationDelegate 的核心价值：<b>以严格的优先级分批策略，
+ * 调度执行 BDRPP/BFPP/BPP 的注册与调用</b>。<br/>
+ * 它是 refresh 第 5-6 步的"执行细节"所在地——代码看起来冗长重复，
+ * 但每个循环、每次重新查询都有其不可替代的理由。
+ * 理解了这个类，就理解了 Spring 后处理器体系的执行时序铁律。</p>
+ *
+ * <hr/>
  * Delegate for AbstractApplicationContext's post-processor handling.
  *
  * @author Juergen Hoeller
@@ -57,7 +112,6 @@ final class PostProcessorRegistrationDelegate {
 
 
 	/**
-	 * <br>
 	 * <h3>架构巅峰：图纸大爆发的中央调度室 🏭</h3>
 	 * <p>
 	 * 这段代码出自 {@code PostProcessorRegistrationDelegate}，在 Spring 圈子里可以说是
@@ -111,12 +165,8 @@ final class PostProcessorRegistrationDelegate {
 		Set<String> processedBeans = new HashSet<>();
 
 
-		/*
-		 * =================================================================================
-		 * ⚔️ 第一战役：处理 BDRPP（新增图纸的设计师）
-		 * =================================================================================
-		 * 代码的一开始，进入了一个巨大的 if (beanFactory instanceof BeanDefinitionRegistry) 分支。只有进入这个分支，才能执行 BDRPP。
-		 */
+/*  ===================================== ⚔️ 第一战役：处理 BDRPP（新增图纸的设计师） =====================================
+ * 代码的一开始，进入了一个巨大的 if (beanFactory instanceof BeanDefinitionRegistry) 分支。只有进入这个分支，才能执行 BeanDefinitionRegistryPostProcessor。*/
 		if (beanFactory instanceof BeanDefinitionRegistry) {
 			BeanDefinitionRegistry registry = (BeanDefinitionRegistry) beanFactory;
 			List<BeanFactoryPostProcessor> regularPostProcessors = new ArrayList<>();
@@ -133,7 +183,7 @@ final class PostProcessorRegistrationDelegate {
 					registryProcessors.add(registryProcessor); //1.3 记下来，一会儿它还得作为 BFPP 执行
 				}
 				else {
-					regularPostProcessors.add(postProcessor);//1.4 如果只是个普通的 BFPP，先存起来
+					regularPostProcessors.add(postProcessor); //1.4 如果只是个普通的 BFPP，先存起来
 				}
 			}
 
@@ -202,13 +252,8 @@ final class PostProcessorRegistrationDelegate {
 				currentRegistryProcessors.clear(); //4.7 清空，准备下一梯队
 			}
 
-			/*
-			 * =================================================================================
-			 * ⚔️ 第二战役：设计师兼职干审核员的活 (BDRPP 兼 BFPP)
-			 * =================================================================================
-			 * 因为 BDRPP 继承自 BFPP，这意味着设计师同时也是审核员。
-			 * 在把新增图纸的活儿干完后，还要顺便调用一下它们作为“审核员”的方法。
-			 */
+/* ===================================== ⚔️ 第二战役：设计师兼职干审核员的活 (BDRPP 兼 BFPP) =====================================
+ * 因为 BDRPP 继承自 BFPP，这意味着设计师同时也是审核员。在把新增图纸的活儿干完后，还要顺便调用一下它们作为“审核员”的方法。 */
 			//5. BDRPP 兼职干 BFPP 的活
 			//5.1 BDRPP 继承了 BFPP，所以它们也必须执行 BFPP 的回调方法
 			// Now, invoke the postProcessBeanFactory callback of all processors handled so far.
@@ -223,13 +268,8 @@ final class PostProcessorRegistrationDelegate {
 			invokeBeanFactoryPostProcessors(beanFactoryPostProcessors, beanFactory);
 		}
 
-		/*
-		 * =================================================================================
-		 * ⚔️ 第三战役：处理纯粹的 BFPP（修改图纸的审核员）
-		 * =================================================================================
-		 * 既然图纸都已经生成完了，接下来就是找那些**专门负责修改已有图纸（比如处理 @Value 占位符）**的 BeanFactoryPostProcessor 了。
-		 * 这一段的逻辑和阶段一非常相似，就是找名字 -> 分组 -> 排序 -> 执行。
-		 */
+/* =====================================  ⚔️ 第三战役：处理纯粹的 BFPP（修改图纸的审核员）=====================================
+ * 既然图纸都已经生成完了，接下来就是找那些**专门负责修改已有图纸（比如处理 @Value 占位符）**的 BeanFactoryPostProcessor 了。这一段的逻辑和阶段一非常相似，就是找名字 -> 分组 -> 排序 -> 执行。*/
 		//1. 查找并分组
 		//1.1 找出所有 BFPP 的名字
 		// Do not initialize FactoryBeans here: We need to leave all regular beans
@@ -284,26 +324,30 @@ final class PostProcessorRegistrationDelegate {
 		}
 		invokeBeanFactoryPostProcessors(nonOrderedPostProcessors, beanFactory);
 
-		/*
-		 * 🧹 结尾扫除：清理临时缓存
-		 * ---------------------------------------------------------
-		 * 所有的审核员都修改完图纸了，图纸正式定稿。
-		 * 清除一下大管家内部那些为了加速而缓存的元数据临时数据。
-		 */
+		/* 🧹 结尾扫除：清理临时缓存
+		 * 所有的审核员都修改完图纸了，图纸正式定稿。清除一下大管家内部那些为了加速而缓存的元数据临时数据。*/
 		// Clear cached merged bean definitions since the post-processors might have
 		// modified the original metadata, e.g. replacing placeholders in values...
 		beanFactory.clearMetadataCache();
 
-		/*
-		 * 🎉 [最终战报总结]
-		 * ---------------------------------------------------------
-		 * 经历完这堪称“八十一难”的精细调度，Spring 容器里所有的 BeanDefinition（图纸）
-		 * 已经达到了完美、最终、可随时实例化的状态！
-		 * 极度苛求的执行顺序链条：
-		 * Priority BDRPP -> Ordered BDRPP -> 普通 BDRPP -> 兼职 BFPP -> Priority BFPP -> Ordered BFPP -> 普通 BFPP。
-		 */
+/* 🎉 [最终战报总结]
+ * 经历完这堪称“八十一难”的精细调度，Spring 容器里所有的 BeanDefinition（图纸） 已经达到了完美、最终、可随时实例化的状态！ 极度苛求的执行顺序链条：
+ * Priority BDRPP -> Ordered BDRPP -> 普通 BDRPP -> 兼职 BFPP -> Priority BFPP -> Ordered BFPP -> 普通 BFPP。*/
 	}
 
+	/**
+	 * <h3>架构巅峰：质检员大军入场站岗 (容器刷新第 6 步 registerBeanPostProcessors) 🔥</h3>
+	 * <p>
+	 * 欢迎来到 Spring 启动流程的第 6 步：{@code registerBeanPostProcessors}！
+	 * 如果说第 5 步是“设计师和审核员”在疯狂修改图纸，那么这第 6 步，就是工厂在正式开工
+	 * 造机器之前，招募并安排<b>“流水线质检员” (BeanPostProcessor，简称 BPP)</b> 入场站岗的过程！
+	 * </p>
+	 * <p>
+	 * 咱们的老朋友<b>【2号大将】(处理 @Autowired 的 AutowiredAnnotationBeanPostProcessor)</b> 和<b>【3号大将】(处理 @PostConstruct CommonAnnotationBeanPostProcessor)</b>，
+	 * 就是在这里被真正实例化，并挂载到流水线上的！
+	 * 这段代码虽然又是那个“臭名昭著”的警告开头，但它的逻辑比第 5 步清晰多了。它严格遵循着<b>“按资排辈、分批入场”</b>的铁律。让我们一行一行拆解：
+	 * </p>
+	 */
 	public static void registerBeanPostProcessors(
 			ConfigurableListableBeanFactory beanFactory, AbstractApplicationContext applicationContext) {
 
@@ -320,70 +364,141 @@ final class PostProcessorRegistrationDelegate {
 		// to ensure that your proposal does not result in a breaking change:
 		// https://github.com/spring-projects/spring-framework/issues?q=PostProcessorRegistrationDelegate+is%3Aclosed+label%3A%22status%3A+declined%22
 
-		String[] postProcessorNames = beanFactory.getBeanNamesForType(BeanPostProcessor.class, true, false);
+		/*
+		 * 📋 工序一：拉出名单，安排“纪检委”
+		 * ---------------------------------------------------------
+		 * [车间大白话] 厂长发话：“把所有岗位是‘流水线质检员’的图纸名字找出来！”
+		 *
+		 * [原理解析] 在让这些质检员上岗前，Spring 极其谨慎地安插了一个纪检委 (BeanPostProcessorChecker)。
+		 * 为什么？因为招募质检员要调用 getBean() 去实例化，万一不小心触发了某个普通业务 Bean
+		 * 的提前创建，此时质检员还没全到位，这个业务 Bean 就会错过质检！纪检委会时刻盯着，
+		 * 发现这种情况就在控制台打 INFO 日志警告：“有个 Bean 提前出生了，它没经过完整质检！”
+		 */
+		String[] postProcessorNames = beanFactory.getBeanNamesForType(BeanPostProcessor.class, true, false);// 从图纸仓库里，找出所有岗位是“流水线质检员（BeanPostProcessor）”的名字
 
 		// Register BeanPostProcessorChecker that logs an info message when
 		// a bean is created during BeanPostProcessor instantiation, i.e. when
 		// a bean is not eligible for getting processed by all BeanPostProcessors.
-		int beanProcessorTargetCount = beanFactory.getBeanPostProcessorCount() + 1 + postProcessorNames.length;
-		beanFactory.addBeanPostProcessor(new BeanPostProcessorChecker(beanFactory, beanProcessorTargetCount));
+		int beanProcessorTargetCount = beanFactory.getBeanPostProcessorCount() + 1 + postProcessorNames.length; // 计算一下预期总共有多少个质检员（已有的 + 将要加的 + 1个马上要加的纪检委）
+		beanFactory.addBeanPostProcessor(new BeanPostProcessorChecker(beanFactory, beanProcessorTargetCount));// 注册一个“纪检委”（BeanPostProcessorChecker）
 
+		/*
+		 * 🗂️ 工序二：准备四个队列，开始分组
+		 * ---------------------------------------------------------
+		 * [车间大白话] 厂长在广场上画了四个圈，准备按优先级给质检员排队。
+		 */
 		// Separate between BeanPostProcessors that implement PriorityOrdered,
 		// Ordered, and the rest.
-		List<BeanPostProcessor> priorityOrderedPostProcessors = new ArrayList<>();
-		List<BeanPostProcessor> internalPostProcessors = new ArrayList<>();
-		List<String> orderedPostProcessorNames = new ArrayList<>();
-		List<String> nonOrderedPostProcessorNames = new ArrayList<>();
+		List<BeanPostProcessor> priorityOrderedPostProcessors = new ArrayList<>();// VIP 质检员队列
+		List<BeanPostProcessor> internalPostProcessors = new ArrayList<>();// 内部特种兵队列（实现了 MergedBeanDefinitionPostProcessor 接口的）
+		List<String> orderedPostProcessorNames = new ArrayList<>(); // 普通 VIP 质检员名单
+		List<String> nonOrderedPostProcessorNames = new ArrayList<>(); // 普通质检员名单
 		for (String ppName : postProcessorNames) {
+			// 1. 如果是顶级 VIP，【立刻实例化（getBean）】，并加入 VIP 队列
 			if (beanFactory.isTypeMatch(ppName, PriorityOrdered.class)) {
-				BeanPostProcessor pp = beanFactory.getBean(ppName, BeanPostProcessor.class);
+				BeanPostProcessor pp = beanFactory.getBean(ppName, BeanPostProcessor.class);// 咱们的【2号大将 @Autowired】和【3号大将】都在这里被找出来并实例化了！
 				priorityOrderedPostProcessors.add(pp);
-				if (pp instanceof MergedBeanDefinitionPostProcessor) {
+				if (pp instanceof MergedBeanDefinitionPostProcessor) {// 🚨 高能注意：如果它同时还是个“内部特种兵”，再把它放进特种兵队列备份一份！
 					internalPostProcessors.add(pp);
 				}
 			}
 			else if (beanFactory.isTypeMatch(ppName, Ordered.class)) {
+				// 2. 如果是普通 VIP，先只把名字记在名单里
 				orderedPostProcessorNames.add(ppName);
 			}
 			else {
+				// 3. 如果是普通员工，也只把名字记在名单里
 				nonOrderedPostProcessorNames.add(ppName);
 			}
 		}
 
+		/*
+		 * 🎖️ 工序三：VIP 质检员入场站岗！
+		 * ---------------------------------------------------------
+		 * [车间大白话] registerBeanPostProcessors 底层就是个 for 循环，挨个调用
+		 * addBeanPostProcessor(pp)。从这一刻起，处理 @Autowired 的质检员正式站到了
+		 * 流水线两旁，手里拿着公章，随时准备给后来的业务 Bean 注入属性！
+		 */
 		// First, register the BeanPostProcessors that implement PriorityOrdered.
-		sortPostProcessors(priorityOrderedPostProcessors, beanFactory);
-		registerBeanPostProcessors(beanFactory, priorityOrderedPostProcessors);
+		sortPostProcessors(priorityOrderedPostProcessors, beanFactory);// 先给 VIP 队列按 @Order 注解排个序
+		registerBeanPostProcessors(beanFactory, priorityOrderedPostProcessors);// 把他们正式挂载到工厂的流水线上！
 
+		/*
+		 * 🚶‍♂️ 工序四：普通 VIP 质检员入场！
+		 * ---------------------------------------------------------
+		 * 跟第一批一模一样，刚才只记了名字，现在正式去库里把他们造出来 (getBean)。
+		 */
 		// Next, register the BeanPostProcessors that implement Ordered.
 		List<BeanPostProcessor> orderedPostProcessors = new ArrayList<>(orderedPostProcessorNames.size());
 		for (String ppName : orderedPostProcessorNames) {
+			// 刚才只记了名字，现在正式去库里把他们造出来（getBean）
 			BeanPostProcessor pp = beanFactory.getBean(ppName, BeanPostProcessor.class);
 			orderedPostProcessors.add(pp);
-			if (pp instanceof MergedBeanDefinitionPostProcessor) {
+			if (pp instanceof MergedBeanDefinitionPostProcessor) { // 同样，如果是特种兵，备份一份
 				internalPostProcessors.add(pp);
 			}
 		}
-		sortPostProcessors(orderedPostProcessors, beanFactory);
-		registerBeanPostProcessors(beanFactory, orderedPostProcessors);
+		sortPostProcessors(orderedPostProcessors, beanFactory);// 排序
+		registerBeanPostProcessors(beanFactory, orderedPostProcessors); // 正式挂载到流水线
 
+		/*
+		 * 👷‍♂️ 工序五：普通质检员入场！
+		 * ---------------------------------------------------------
+		 * 最底层的打工人入场。没有排序注解，直接造出来挂载。
+		 */
 		// Now, register all regular BeanPostProcessors.
 		List<BeanPostProcessor> nonOrderedPostProcessors = new ArrayList<>(nonOrderedPostProcessorNames.size());
 		for (String ppName : nonOrderedPostProcessorNames) {
-			BeanPostProcessor pp = beanFactory.getBean(ppName, BeanPostProcessor.class);
+			BeanPostProcessor pp = beanFactory.getBean(ppName, BeanPostProcessor.class);// 造出来（getBean）
 			nonOrderedPostProcessors.add(pp);
-			if (pp instanceof MergedBeanDefinitionPostProcessor) {
+			if (pp instanceof MergedBeanDefinitionPostProcessor) { //  特种兵备份
 				internalPostProcessors.add(pp);
 			}
 		}
-		registerBeanPostProcessors(beanFactory, nonOrderedPostProcessors);
+		registerBeanPostProcessors(beanFactory, nonOrderedPostProcessors); // 没有排序（因为他们没写排序注解），直接挂载到流水线
 
+		/*
+		 * 🥷 工序六：特种兵的“强制插队”战术 (核心设计 🔥)
+		 * ---------------------------------------------------------
+		 * [底层揭秘] 厂长，他们刚才不是注册过了吗？为什么又要注册？
+		 * 因为 addBeanPostProcessor 有个特性：如果发现质检员已在流水线上，会先把他从
+		 * 原位置踢出去，重新加到队伍的【最末尾】！
+		 *
+		 * [设计意图] 为什么要把 MergedBeanDefinitionPostProcessor 内部特种兵 (如处理 @Autowired 的类) 移到最后？
+		 * 因为这类“内部特种兵”（比如处理 @Autowired 的类） 要在 Bean 实例化后的第一时刻，去修改、合并 Bean 的定义信息（图纸）。
+		 * Spring 强制把他们移到所有的普通质检员之后（或者说让他们在特定生命周期处于靠后的链条中），以确保框架内部的注入规则享有绝对的控制权。
+		 */
 		// Finally, re-register all internal BeanPostProcessors.
-		sortPostProcessors(internalPostProcessors, beanFactory);
-		registerBeanPostProcessors(beanFactory, internalPostProcessors);
+		sortPostProcessors(internalPostProcessors, beanFactory);// 最后，把所有特种兵排序
+		registerBeanPostProcessors(beanFactory, internalPostProcessors); // 再次注册他们！
 
+		/*
+		 * 👁️‍🗨️ 工序七：安排最后一道门卫 (ApplicationListenerDetector)
+		 * ---------------------------------------------------------
+		 * [车间大白话] 这是专门探测 Bean 是否实现了事件监听器接口的。为什么必须插在绝对末尾？
+		 * 因为在流水线中段，前面的 AOP 质检员极可能把一个普通 Bean 狸猫换太子变成 CGLIB 代理！
+		 * 探测器放后面，才能看到最终定型的代理对象，确保事件监听器绑定在最准确的最终对象上！
+		 */
 		// Re-register post-processor for detecting inner beans as ApplicationListeners,
 		// moving it to the end of the processor chain (for picking up proxies etc).
 		beanFactory.addBeanPostProcessor(new ApplicationListenerDetector(applicationContext));
+		/*
+		 * =================================================================================
+		 * 🎉 终极决战预告：工厂静默，大戏开场！
+		 * =================================================================================
+		 * 厂长，这段代码极具节奏感：找人 ➡️ 分 3 批排队 ➡️ 依次上岗 ➡️ 调整特种兵位置 ➡️ 安排最后门卫。
+		 *
+		 * 至此，refresh() 前 10 步的准备工作彻底、完全、100% 结束了！
+		 * 你的图纸全部在仓库里了。
+		 * 帮你处理 @Autowired 的质检员站在流水线左边了。
+		 * 帮你处理 AOP 代理的质检员站在流水线右边了。
+		 * 门卫也站好了。
+		 *
+		 * 整个 Spring 工厂鸦雀无声，所有人都在屏息以待厂长按下“开机总控按钮”。
+		 * 厂长，只要你一声令下，我们就可以直接冲进 refresh() 第 11 步：finishBeanFactoryInitialization。
+		 * 去直面那个著名的 getBean() 和 doCreateBean()，去看看第一台机器是怎么被 new 出来，
+		 * 循环依赖又是怎么被解决的！
+		 */
 	}
 
 	private static void sortPostProcessors(List<?> postProcessors, ConfigurableListableBeanFactory beanFactory) {
@@ -430,16 +545,53 @@ final class PostProcessorRegistrationDelegate {
 	}
 
 	/**
+	 * <h3>架构微操：CopyOnWriteArrayList 的批量入职艺术 🚀</h3>
+	 * <p>
+	 * 这段代码正是将分好组的“流水线质检员（BeanPostProcessor）”正式挂载到工厂流水线上的真正执行者。
+	 * 虽然只有短短十几行，但里面却藏着一个 <b>Java 并发编程与底层性能优化的“神级细节”</b>！
+	 * </p>
+	 * * <h4>📝 核心奥秘：为什么非要分 if 和 else？</h4>
+	 * <p>
+	 * 在常规思维里，把一个列表加到工厂里，直接写个 for 循环不就完事了吗？？也就是代码里 else 分支干的事,为什么 Spring 偏偏要多此一举，
+	 * 搞个 if 判断做一个“批量添加 (Bulk addition)”？这源于大管家 (BeanFactory)
+	 * 底层存储质检员的数据结构：<b>CopyOnWriteArrayList (写时复制列表)</b>。
+	 * </p>
+	 * <br>
+	 * <hr>
+	 * <p><b>[Original Spring Documentation]</b></p>
 	 * Register the given BeanPostProcessor beans.
 	 */
 	private static void registerBeanPostProcessors(
 			ConfigurableListableBeanFactory beanFactory, List<BeanPostProcessor> postProcessors) {
 
+		/*
+		 * 🏭 极致优化：批量写入规避复制风暴 (Bulk Addition)
+		 * ---------------------------------------------------------
+		 * [原理解析] AbstractBeanFactory 是大管家的底层基类。在这里，所有的质检员（BeanPostProcessor）都被存放在
+		 * CopyOnWriteArrayList 集合中。这是一种极其适合“读多写少”并发场景的数据结构。
+		 * Spring 启动后，每次 new 一个 Bean，都要去遍历读取这几十个质检员，读取频率极高（上万次）；但注册质检员（写操作）只在工厂启动时发生一次。所以用它最安全、最快！
+		 *
+		 * 🚨 [致命的性能瓶颈]
+		 * CopyOnWriteArrayList 的特点是：每一次写 (add) 操作，都会把底层的整个数组完全 Copy 一份！
+		 * 假设有 50 个质检员，如果用 for 循环挨个 add，底层数组就会被毫无意义地复制 50 次，极其消耗内存和 CPU！
+		 *
+		 * [车间大白话：批量入职]
+		 * 人事经理说：“既然你们这 50 个质检员是一起排好队来的，就别挨个重写花名册了。我直接用批量添加
+		 * (addAll)，底层只复制 1 次花名册，把你们 50 个人一次性全写进去！”
+		 * 👉 这就是 Spring 源码追求极致性能的完美体现！
+		 */
 		if (beanFactory instanceof AbstractBeanFactory) {
 			// Bulk addition is more efficient against our CopyOnWriteArrayList there
 			((AbstractBeanFactory) beanFactory).addBeanPostProcessors(postProcessors);
 		}
 		else {
+			/*
+			 * 🪂 兜底逻辑：常规循环注入 (Fallback)
+			 * ---------------------------------------------------------
+			 * [车间大白话] 万一今天来管事的不是咱们标准的官方大管家 (不是 AbstractBeanFactory)，
+			 * 而是用户自己乱写的一个非主流工厂，那人事经理就没办法用“批量入职”的高级操作了。
+			 * 只能老老实实回到最原始的 for 循环，挨个办理入职登记。
+			 */
 			for (BeanPostProcessor postProcessor : postProcessors) {
 				beanFactory.addBeanPostProcessor(postProcessor);
 			}

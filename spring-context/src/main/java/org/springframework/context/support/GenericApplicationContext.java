@@ -42,6 +42,101 @@ import org.springframework.lang.Nullable;
 import org.springframework.util.Assert;
 
 /**
+ * <h1>🗺️ 一、架构坐标·全局定位</h1>
+ * <h2>AbstractApplicationContext 的"现代派实装"——一次性工厂，内置大管家，不走回头路！</h2>
+ * <ul>
+ * <li><b>全限定名</b>：{@code org.springframework.context.support.GenericApplicationContext}</li>
+ * <li><b>中文名</b>：通用应用上下文 —— 现代 Spring 的"标准工厂车间"</li>
+ * <li><b>所属车间 🏭</b>：{@code spring-context} 模块的 support 包（注意！support 包 = 抽象骨架的具体实现！
+ * context 包定义接口契约，support 包提供真正可用的实现类。就像 context 包是"建筑图纸"，
+ * support 包是"施工队"——AbstractApplicationContext、GenericApplicationContext、
+ * ClassPathXmlApplicationContext 全在这里）</li>
+ * <li><b>类层级</b>：{@code AbstractApplicationContext} 的直系子类 + 实现 {@code BeanDefinitionRegistry}，
+ * 增加了<b>内置 BeanFactory + BD 注册能力 + 一次性 refresh 保护</b></li>
+ * </ul>
+ *
+ * <h3>💡 为什么需要 GenericApplicationContext？——"现代派"和"传统派"的分水岭！</h3>
+ * <p>Spring 的容器实现有两大流派，它们在"BeanFactory 的创建时机"上存在本质分歧：</p>
+ * <table border="1" cellpadding="5" cellspacing="0">
+ * <tr><th>维度</th><th>传统 XML 派 (AbstractRefreshableApplicationContext)</th><th>现代派 (GenericApplicationContext) ← 你在这里！</th></tr>
+ * <tr><td>BeanFactory 创建时机</td><td>每次 refresh() 时销毁旧的、创建新的</td><td><b>构造方法中一次性创建，refresh() 只允许调一次</b></td></tr>
+ * <tr><td>BD 注册方式</td><td>refresh() 过程中由 Reader 加载</td><td><b>refresh() 之前就可以注册 BD（实现了 BeanDefinitionRegistry）</b></td></tr>
+ * <tr><td>是否可重复 refresh</td><td>✅ 可以（砸旧建新）</td><td><b>❌ 不行（CAS 保护，调两次直接报错）</b></td></tr>
+ * <tr><td>典型子类</td><td>ClassPathXmlApplicationContext</td><td><b>AnnotationConfigApplicationContext（最常用！）</b></td></tr>
+ * <tr><td>设计哲学</td><td>热部署/热加载（Java EE 时代）</td><td><b>不可变基础设施（云原生时代）</b></td></tr>
+ * </table>
+ * <p>GenericApplicationContext 的设计哲学：<b>"工厂从出生（new）那一刻起就自带大管家（DefaultListableBeanFactory），
+ * 你可以在 refresh() 之前随便往里面塞图纸（BD），但 refresh() 只能开一次机，绝不回头！"</b></p>
+ *
+ * <h3>🧬 这里蕴含的设计精髓——你的业务能偷师什么？</h3>
+ * <ol>
+ * <li><b>"组合持有"而非"按需创建"——工厂一出生就自带引擎</b><br/>
+ * GenericApplicationContext 在构造方法中直接 {@code new DefaultListableBeanFactory()}，
+ * 而不是等 refresh() 时才创建。这意味着你在 refresh() 之前就能往工厂里注册 BD——<br/>
+ * 这对于编程式注册（{@code registerBeanDefinition()}、{@code registerBean()}）极其友好。<br/>
+ * <b>业务借鉴</b>：如果你的对象在创建后需要"配置 → 启动"两阶段，
+ * 让核心组件在构造阶段就绑定好（而不是启动阶段才创建），能大幅简化配置流程。
+ * 比如你的消息队列消费者，在构造时就绑定 channel，启动前可以灵活配置消费策略。</li>
+ *
+ * <li><b>CAS 防重复刷新——"不可变基础设施"在代码层面的体现</b><br/>
+ * {@code refreshed} 是一个 {@code AtomicBoolean}，在 {@code refreshBeanFactory()} 中用
+ * CAS（compareAndSet）保证 refresh() 只能成功调用一次。<br/>
+ * 这不是技术限制，而是<b>架构宣言</b>：现代应用不需要热刷新，配置变了就重建新实例！<br/>
+ * <b>业务借鉴</b>：当你的系统中某个操作语义上就是"一次性"的（如订单支付、合同签署），
+ * 用 CAS 或状态机在代码层面强制保证幂等，比文档约束可靠一万倍。</li>
+ *
+ * <li><b>实现 BeanDefinitionRegistry——让上下文本身成为"图纸柜台"</b><br/>
+ * GenericApplicationContext 同时实现了 {@code BeanDefinitionRegistry}，
+ * 所有注册方法都委托给内部的 DefaultListableBeanFactory。<br/>
+ * 这样外部代码（如 {@code BeanDefinitionReader}、{@code ClassPathBeanDefinitionScanner}）
+ * 可以直接把 GenericApplicationContext 当作注册中心使用，不需要先获取内部 BeanFactory。<br/>
+ * <b>业务借鉴</b>：如果你的"管理器"内部持有一个"注册表"，
+ * 可以让管理器直接实现注册表接口并委托给内部实例——调用者不需要知道内部有多少层。</li>
+ * </ol>
+ *
+ * <h3>🧬 继承体系定位</h3>
+ * <pre>
+ * DefaultResourceLoader
+ * └── AbstractApplicationContext                 （模板方法骨架：refresh() 12 步）
+ *       ├── AbstractRefreshableApplicationContext （传统 XML 派：每次 refresh 砸旧建新）
+ *       │     └── AbstractRefreshableConfigApplicationContext
+ *       │           └── AbstractXmlApplicationContext
+ *       │                 ├── ClassPathXmlApplicationContext
+ *       │                 └── FileSystemXmlApplicationContext
+ *       └── GenericApplicationContext             ← 👈 你在这里！（现代派：一次性 refresh）
+ *             ├── AnnotationConfigApplicationContext   ← ⭐ 最常用的入口！你的 Spring Boot 最终到这里
+ *             ├── GenericXmlApplicationContext
+ *             ├── StaticApplicationContext
+ *             └── GenericWebApplicationContext
+ *
+ * 同时实现：BeanDefinitionRegistry（让上下文自身具备 BD 注册能力）
+ * </pre>
+ *
+ * <h3>🗂️ 二、战区划分·全局作战地图</h3>
+ * <p>4 个字段 + 4 组构造器 + N 个方法，划分为 <b>五大战区</b>：</p>
+ * <table border="1" cellpadding="5" cellspacing="0">
+ * <tr><th>战区</th><th>使命</th><th>成员</th></tr>
+ * <tr><td><b>🏗️ 第零战区：内部状态</b></td><td>持有大管家 + 刷新标志</td>
+ * <td>beanFactory(DefaultListableBeanFactory) / resourceLoader / customClassLoader / refreshed(AtomicBoolean)</td></tr>
+ * <tr><td><b>🔧 第一战区：构造与配置</b></td><td>创建工厂、设置父容器、配置开关</td>
+ * <td>4 个构造器 / setParent / setAllowBeanDefinitionOverriding / setAllowCircularReferences / setResourceLoader</td></tr>
+ * <tr><td><b>⚙️ 第二战区：模板方法实现</b></td><td>实现 AbstractApplicationContext 的抽象方法</td>
+ * <td>refreshBeanFactory(CAS 防重刷) / closeBeanFactory / getBeanFactory / cancelRefresh</td></tr>
+ * <tr><td><b>📋 第三战区：BD 注册代理</b></td><td>实现 BeanDefinitionRegistry，全部委托给内部 BeanFactory</td>
+ * <td>registerBeanDefinition / removeBeanDefinition / getBeanDefinition / registerAlias / removeAlias / isAlias</td></tr>
+ * <tr><td><b>🎯 第四战区：便捷注册</b></td><td>编程式注册 Bean 的快捷方法（5.0+ 新增）</td>
+ * <td>registerBean 系列重载（Class/Supplier/BeanDefinitionCustomizer）</td></tr>
+ * </table>
+ *
+ * <h3>🎯 三、战略复盘</h3>
+ * <p>GenericApplicationContext 的核心价值：<b>用"一次性工厂 + 构造时绑定 BeanFactory + CAS 防重刷"
+ * 的设计范式，取代了传统的"每次 refresh 砸旧建新"模式</b>。<br/>
+ * 它是现代 Spring（Spring Boot / 注解驱动 / 云原生）的基石——
+ * AnnotationConfigApplicationContext 就是它的直系子类。<br/>
+ * 同时它通过实现 BeanDefinitionRegistry，让"上下文"和"注册中心"合二为一，
+ * 大幅简化了编程式配置的使用姿势。</p>
+ *
+ * <hr/>
  * Generic ApplicationContext implementation that holds a single internal
  * {@link org.springframework.beans.factory.support.DefaultListableBeanFactory}
  * instance and does not assume a specific bean definition format. Implements
@@ -96,13 +191,22 @@ import org.springframework.util.Assert;
  */
 public class GenericApplicationContext extends AbstractApplicationContext implements BeanDefinitionRegistry {
 
+	/* =======================================================================================================
+	          🏗️ 第零战区：内部状态 —— 大管家（BeanFactory）+ 资源加载器 + 防重刷标志
+	   =======================================================================================================*/
+
+	/** 🏭 大管家本尊！构造方法中直接 new 出来，refresh() 前就能往里面注册 BD。
+	 *  这是现代派和传统派的核心区别——传统派在 refresh 时才创建，现代派一出生就有！ */
 	private final DefaultListableBeanFactory beanFactory;
 
+	/** 可选的自定义资源加载器，未设置时使用父类 DefaultResourceLoader 的默认行为 */
 	@Nullable
 	private ResourceLoader resourceLoader;
 
+	/** 标记是否通过 setClassLoader() 设置了自定义类加载器（影响 getClassLoader() 的委托逻辑） */
 	private boolean customClassLoader = false;
 
+	/** 🛡️ 一次性防伪封条！CAS 保证 refresh() 只能成功调用一次，第二次直接报 IllegalStateException */
 	private final AtomicBoolean refreshed = new AtomicBoolean();
 
 

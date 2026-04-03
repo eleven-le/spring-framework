@@ -89,6 +89,124 @@ import org.springframework.util.ObjectUtils;
 import org.springframework.util.ReflectionUtils;
 
 /**
+ * <h1>🗺️ 一、架构坐标·全局定位</h1>
+ * <h2>ApplicationContext 的"模板方法骨架"——refresh() 十二步的总指挥！</h2>
+ * <ul>
+ * <li><b>全限定名</b>：{@code org.springframework.context.support.AbstractApplicationContext}</li>
+ * <li><b>中文名</b>：抽象应用上下文 —— Spring 容器启动流程的"总指挥部"</li>
+ * <li><b>所属车间 🏭</b>：{@code spring-context} 模块的 support 包（注意！support 包 = 骨架实现区！
+ * context 包定义接口契约（ApplicationContext/ConfigurableApplicationContext），
+ * support 包提供抽象骨架和具体实现——AbstractApplicationContext 是所有具体上下文的公共祖先，
+ * GenericApplicationContext、ClassPathXmlApplicationContext 等都在这个包里）</li>
+ * <li><b>类层级</b>：继承 {@code DefaultResourceLoader}（资源加载能力）+ 实现 {@code ConfigurableApplicationContext}（可配置容器契约），
+ * 用<b>模板方法模式</b>定义了 refresh() 十二步的完整流程骨架</li>
+ * </ul>
+ *
+ * <h3>💡 为什么需要 AbstractApplicationContext？——从 BeanFactory 到 ApplicationContext 的"能力飞跃"！</h3>
+ * <p>回顾 BeanFactory 体系：它只管"造 Bean"——创建、注入、初始化、销毁。<br/>
+ * 但一个真正的应用容器还需要更多：</p>
+ * <ul>
+ * <li><b>启动流程编排</b>：谁先谁后？BFPP 先跑、BPP 再注册、最后才造单例——这套顺序不能乱！</li>
+ * <li><b>事件广播系统</b>：ContextRefreshedEvent、ContextClosedEvent——Bean 之间需要松耦合的通信机制</li>
+ * <li><b>国际化消息</b>：MessageSource——让应用能说多种语言</li>
+ * <li><b>资源加载</b>：classpath:、file:、http:——统一的资源定位能力</li>
+ * <li><b>生命周期管理</b>：start/stop/close——优雅启停</li>
+ * <li><b>父子容器层级</b>：子容器能访问父容器的 Bean，反过来不行</li>
+ * <li><b>环境抽象</b>：Environment——profile 切换、property 解析</li>
+ * </ul>
+ * <p>AbstractApplicationContext 就是把上述所有能力<b>整合在一起</b>的"总指挥部"——<br/>
+ * 它不直接持有 BeanFactory（由子类决定），但通过 {@code getBeanFactory()} 抽象方法获取内部 BeanFactory，
+ * 然后在 {@code refresh()} 中编排完整的启动流程。<br/>
+ * <b>这就是模板方法模式的教科书级实践：骨架在父类，变化点留给子类！</b></p>
+ *
+ * <h3>🧬 这里蕴含的设计精髓——你的业务能偷师什么？</h3>
+ * <ol>
+ * <li><b>模板方法模式的巅峰实践——refresh() 定义流程，子类填充细节</b><br/>
+ * refresh() 定义了 12 步骨架流程，其中 {@code refreshBeanFactory()}、{@code postProcessBeanFactory()}、
+ * {@code onRefresh()}、{@code onClose()} 等是子类扩展点。<br/>
+ * 传统 XML 派（AbstractRefreshableApplicationContext）在 refreshBeanFactory 中砸旧建新；<br/>
+ * 现代注解派（GenericApplicationContext）在 refreshBeanFactory 中只做 CAS 防重刷。<br/>
+ * 同一个 refresh() 骨架，两种完全不同的行为！<br/>
+ * <b>业务借鉴</b>：当你的业务有"固定流程 + 可变步骤"的特征时（如订单处理流程：校验→扣库存→支付→通知，
+ * 但不同渠道的校验逻辑不同），用模板方法模式是最优解。</li>
+ *
+ * <li><b>"组合优于继承"的完美示范——持有而非成为</b><br/>
+ * AbstractApplicationContext 实现了 MessageSource、ResourcePatternResolver、ApplicationEventPublisher 等接口，
+ * 但它<b>不亲自处理</b>——而是内部持有 messageSource、applicationEventMulticaster 等委托对象。<br/>
+ * 调用 getMessage() 时，实际委托给内部的 MessageSource Bean；调用 publishEvent() 时，委托给 ApplicationEventMulticaster。<br/>
+ * 这样每个能力都可以独立替换（自定义 MessageSource、自定义事件广播器），而不影响其他能力。<br/>
+ * <b>业务借鉴</b>：你的"门面对象"可以实现多个接口来提供统一入口，但底层委托给不同的专家对象。
+ * 比如你的 OrderFacade 实现了 OrderQuery + OrderCommand 接口，但分别委托给 OrderQueryService 和 OrderCommandService。</li>
+ *
+ * <li><b>synchronized + CAS 双保险——启动和关闭的线程安全</b><br/>
+ * {@code startupShutdownMonitor} 用 synchronized 保证 refresh() 和 close() 不会并发执行；<br/>
+ * {@code active}（AtomicBoolean）和 {@code closed}（AtomicBoolean）用 CAS 保证状态切换的原子性。<br/>
+ * 双重保护：粗粒度的互斥锁 + 细粒度的原子状态标志。<br/>
+ * <b>业务借鉴</b>：对于"启动/关闭"这种生命周期操作，不要只靠一种并发机制。
+ * 用锁保证操作的互斥（不能同时启动和关闭），用原子变量保证状态的可见性（其他线程能立即看到状态变化）。</li>
+ *
+ * <li><b>"well-known name"约定——用魔法常量建立松耦合的组件发现</b><br/>
+ * {@code messageSource}、{@code applicationEventMulticaster}、{@code lifecycleProcessor} 这三个
+ * 基础设施 Bean 用固定的名称在容器中查找。如果你注册了同名的自定义 Bean，Spring 会用你的替代默认的。<br/>
+ * 这就是"约定优于配置"——不需要显式声明"我的 MessageSource 是谁"，只要注册一个名为 "messageSource" 的 Bean 即可。<br/>
+ * <b>业务借鉴</b>：系统中的基础设施组件（如日志、监控、缓存管理器），用约定名称发现比显式注入更灵活。
+ * 允许用户通过注册同名组件来覆盖默认行为。</li>
+ * </ol>
+ *
+ * <h3>🧬 继承体系定位</h3>
+ * <pre>
+ * DefaultResourceLoader                          （资源加载基础能力）
+ * └── AbstractApplicationContext                  ← 👈 你在这里！（模板方法骨架：refresh() 十二步）
+ *       │
+ *       │ 实现接口：ConfigurableApplicationContext（可配置容器契约）
+ *       │          → ApplicationContext → ListableBeanFactory + HierarchicalBeanFactory
+ *       │          → MessageSource / ApplicationEventPublisher / ResourcePatternResolver
+ *       │          → Lifecycle / Closeable
+ *       │
+ *       ├── AbstractRefreshableApplicationContext  （传统 XML 派：每次 refresh 砸旧建新 BeanFactory）
+ *       │     └── ... → ClassPathXmlApplicationContext / FileSystemXmlApplicationContext
+ *       │
+ *       └── GenericApplicationContext              （现代注解派：一次性 refresh，构造时就有 BeanFactory）
+ *             └── AnnotationConfigApplicationContext  ← ⭐ Spring Boot 的起点！
+ *
+ * ⚠️ 关键设计：AbstractApplicationContext 自身不持有 BeanFactory！
+ *    通过抽象方法 getBeanFactory() 让子类决定如何提供——这就是模板方法模式的精髓。
+ * </pre>
+ *
+ * <h3>🗂️ 二、战区划分·全局作战地图</h3>
+ * <p>3 个常量 + 15+ 个字段 + N 个方法，划分为 <b>八大战区</b>：</p>
+ * <table border="1" cellpadding="5" cellspacing="0">
+ * <tr><th>战区</th><th>使命</th><th>核心成员</th></tr>
+ * <tr><td><b>🏷️ 第零战区：Well-known 常量</b></td><td>定义基础设施 Bean 的约定名称</td>
+ * <td>MESSAGE_SOURCE_BEAN_NAME / APPLICATION_EVENT_MULTICASTER_BEAN_NAME / LIFECYCLE_PROCESSOR_BEAN_NAME</td></tr>
+ * <tr><td><b>🏗️ 第一战区：内部状态字段</b></td><td>持有容器的所有运行时状态</td>
+ * <td>id/displayName/parent/environment/beanFactoryPostProcessors/active/closed/startupShutdownMonitor/
+ * messageSource/applicationEventMulticaster/lifecycleProcessor/applicationListeners/earlyApplicationEvents</td></tr>
+ * <tr><td><b>🚀 第二战区：refresh() 十二步</b></td><td>容器启动的完整编排流程（绝对核心！）</td>
+ * <td>refresh() → prepareRefresh/obtainFreshBeanFactory/prepareBeanFactory/postProcessBeanFactory/
+ * invokeBeanFactoryPostProcessors/registerBeanPostProcessors/initMessageSource/initApplicationEventMulticaster/
+ * onRefresh/registerListeners/finishBeanFactoryInitialization/finishRefresh</td></tr>
+ * <tr><td><b>🛑 第三战区：关闭与销毁</b></td><td>优雅关停容器</td>
+ * <td>close/doClose/destroyBeans/onClose/registerShutdownHook</td></tr>
+ * <tr><td><b>📢 第四战区：事件发布</b></td><td>ApplicationEventPublisher 的实现</td>
+ * <td>publishEvent（3 个重载）→ 委托给 applicationEventMulticaster + 父容器冒泡</td></tr>
+ * <tr><td><b>🔀 第五战区：BeanFactory 代理</b></td><td>把 BeanFactory/ListableBeanFactory 接口方法全部委托给内部 BeanFactory</td>
+ * <td>getBean系列 / containsBean / getBeanNamesForType / getBeansOfType / ... （全部 assertBeanFactoryActive() 后委托）</td></tr>
+ * <tr><td><b>🌍 第六战区：MessageSource 代理</b></td><td>国际化消息解析</td>
+ * <td>getMessage（3 个重载）→ 委托给内部 messageSource</td></tr>
+ * <tr><td><b>🔧 第七战区：抽象方法</b></td><td>留给子类实现的模板方法</td>
+ * <td>refreshBeanFactory() / closeBeanFactory() / getBeanFactory()（三个抽象方法 = 两大流派的分水岭！）</td></tr>
+ * </table>
+ *
+ * <h3>🎯 三、战略复盘</h3>
+ * <p>AbstractApplicationContext 的核心价值：<b>用模板方法模式定义了 Spring 容器启动（refresh）和关闭（close）
+ * 的完整流程骨架，同时通过"组合 + 委托"整合了事件广播、国际化、资源加载、生命周期管理等横切能力</b>。<br/>
+ * 它是 Spring 框架中<b>代码量最大、职责最重、调用链最长</b>的类之一——<br/>
+ * 无论你用的是 XML 配置、注解配置、还是 Spring Boot，最终都殊途同归到这个 refresh() 方法。<br/>
+ * 理解了 AbstractApplicationContext，就理解了 Spring 容器的"大动脉"——<br/>
+ * 其他所有机制（BPP、BFPP、事件、AOP、事务）都是在 refresh() 的某一步中被激活的。</p>
+ *
+ * <hr/>
  * Abstract implementation of the {@link org.springframework.context.ApplicationContext}
  * interface. Doesn't mandate the type of storage used for configuration; simply
  * implements common context functionality. Uses the Template Method design pattern,
@@ -136,7 +254,17 @@ import org.springframework.util.ReflectionUtils;
 public abstract class AbstractApplicationContext extends DefaultResourceLoader
 		implements ConfigurableApplicationContext {
 
+	/* =======================================================================================================
+	          🏷️ 第零战区：Well-known 常量 —— 基础设施 Bean 的"约定门牌号"
+	          容器会按这些固定名称在 BeanFactory 中查找基础设施组件，找到就用你的，找不到就用默认的。
+	          这就是"约定优于配置"在 Spring 内核中的体现！
+	   =======================================================================================================*/
+
 	/**
+	 * <h3>🏷️ 常量 1：MESSAGE_SOURCE_BEAN_NAME = "messageSource"</h3>
+	 * <p><b>国际化消息源的约定 Bean 名称</b>。在 initMessageSource() 中按此名查找，
+	 * 找到了就用你自定义的 MessageSource；找不到就创建一个 DelegatingMessageSource（空壳，委托给父容器）。</p>
+	 * <hr/>
 	 * The name of the {@link MessageSource} bean in the context.
 	 * If none is supplied, message resolution is delegated to the parent.
 	 * @see org.springframework.context.MessageSource
@@ -147,6 +275,11 @@ public abstract class AbstractApplicationContext extends DefaultResourceLoader
 	public static final String MESSAGE_SOURCE_BEAN_NAME = "messageSource";
 
 	/**
+	 * <h3>🏷️ 常量 2：APPLICATION_EVENT_MULTICASTER_BEAN_NAME = "applicationEventMulticaster"</h3>
+	 * <p><b>事件广播器的约定 Bean 名称</b>。在 initApplicationEventMulticaster() 中按此名查找，
+	 * 找到了就用你自定义的广播器（如异步广播）；找不到就创建 SimpleApplicationEventMulticaster（同步广播）。<br/>
+	 * 自定义广播器是实现"事件异步化"的常用手段：注册一个同名 Bean 并设置 taskExecutor 即可。</p>
+	 * <hr/>
 	 * The name of the {@link ApplicationEventMulticaster} bean in the context.
 	 * If none is supplied, a {@link SimpleApplicationEventMulticaster} is used.
 	 * @see org.springframework.context.event.ApplicationEventMulticaster
@@ -157,6 +290,11 @@ public abstract class AbstractApplicationContext extends DefaultResourceLoader
 	public static final String APPLICATION_EVENT_MULTICASTER_BEAN_NAME = "applicationEventMulticaster";
 
 	/**
+	 * <h3>🏷️ 常量 3：LIFECYCLE_PROCESSOR_BEAN_NAME = "lifecycleProcessor"</h3>
+	 * <p><b>生命周期处理器的约定 Bean 名称</b>。在 initLifecycleProcessor() 中按此名查找，
+	 * 找到了就用你自定义的；找不到就创建 DefaultLifecycleProcessor。<br/>
+	 * 负责管理 SmartLifecycle Bean 的 start/stop/onRefresh/onClose。</p>
+	 * <hr/>
 	 * The name of the {@link LifecycleProcessor} bean in the context.
 	 * If none is supplied, a {@link DefaultLifecycleProcessor} is used.
 	 * @since 3.0
@@ -183,68 +321,90 @@ public abstract class AbstractApplicationContext extends DefaultResourceLoader
 	}
 
 
-	/** Logger used by this class. Available to subclasses. */
+	/* =======================================================================================================
+	          🏗️ 第一战区：内部状态字段 —— 容器运行时的"神经中枢"
+	          分为四组：①身份信息 ②并发与生命周期控制 ③基础设施委托对象 ④事件系统
+	   =======================================================================================================*/
+
+	// ─────────────────── ① 身份信息与日志 ───────────────────
+
+	/** 日志记录器，子类也能直接使用 */
 	protected final Log logger = LogFactory.getLog(getClass());
 
-	/** Unique id for this context, if any. */
+	/** 容器的唯一 ID，默认是对象的 identityToString（如 "...@1a2b3c"），可通过 setId() 自定义 */
 	private String id = ObjectUtils.identityToString(this);
 
-	/** Display name. */
+	/** 容器的友好显示名称，用于日志和 toString()。默认同 id，可通过 setDisplayName() 自定义 */
 	private String displayName = ObjectUtils.identityToString(this);
 
-	/** Parent context. */
+	/** 父容器引用。子容器能访问父容器的 Bean（getBean 时向上查找），但父容器看不到子容器的 Bean */
 	@Nullable
 	private ApplicationContext parent;
 
-	/** Environment used by this context. */
+	/** 环境对象（持有 profile 激活列表 + PropertySource 属性源链），懒初始化，首次 getEnvironment() 时创建 */
 	@Nullable
 	private ConfigurableEnvironment environment;
 
-	/** BeanFactoryPostProcessors to apply on refresh. */
+	// ─────────────────── ② 并发与生命周期控制 ───────────────────
+
+	/** 通过 addBeanFactoryPostProcessor() 手动添加的 BFPP 列表（区别于容器中以 Bean 形式注册的 BFPP！）
+	 *  这些 BFPP 在 invokeBeanFactoryPostProcessors() 中优先执行 */
 	private final List<BeanFactoryPostProcessor> beanFactoryPostProcessors = new ArrayList<>();
 
-	/** System time in milliseconds when this context started. */
+	/** 容器启动时间戳（毫秒），在 prepareRefresh() 中记录 */
 	private long startupDate;
 
-	/** Flag that indicates whether this context is currently active. */
+	/** 🟢 容器是否处于"活跃"状态（refresh 成功后 → true，close 后 → false）。
+	 *  所有 getBean/getBeanNamesForType 等代理方法都会先 assertBeanFactoryActive() 检查此标志 */
 	private final AtomicBoolean active = new AtomicBoolean();
 
-	/** Flag that indicates whether this context has been closed already. */
+	/** 🔴 容器是否已关闭（close/doClose 时 CAS 设为 true）。
+	 *  与 active 配合使用：active=false + closed=true → 已关闭；active=false + closed=false → 尚未 refresh */
 	private final AtomicBoolean closed = new AtomicBoolean();
 
-	/** Synchronization monitor for "refresh" and "close". */
+	/** 🔒 启动/关闭的全局互斥锁。refresh() 和 close() 都在此锁内执行，保证不会并发启停 */
 	private final Object startupShutdownMonitor = new Object();
 
-	/** Reference to the JVM shutdown hook, if registered. */
+	/** JVM 关闭钩子线程。调用 registerShutdownHook() 后注册，JVM 关闭时自动触发 doClose() 优雅停机 */
 	@Nullable
 	private Thread shutdownHook;
 
-	/** ResourcePatternResolver used by this context. */
+	// ─────────────────── ③ 基础设施委托对象（"组合优于继承"的典范） ───────────────────
+
+	/** 🔍 资源模式解析器（classpath*:、ant-style 通配符）。构造方法中创建，默认是 PathMatchingResourcePatternResolver */
 	private final ResourcePatternResolver resourcePatternResolver;
 
-	/** LifecycleProcessor for managing the lifecycle of beans within this context. */
+	/** 🔄 生命周期处理器。在 initLifecycleProcessor() 中按 well-known name 查找或创建默认的 DefaultLifecycleProcessor。
+	 *  负责驱动 SmartLifecycle Bean 的 start()/stop() */
 	@Nullable
 	private LifecycleProcessor lifecycleProcessor;
 
-	/** MessageSource we delegate our implementation of this interface to. */
+	/** 🌍 国际化消息源。在 initMessageSource() 中按 well-known name 查找或创建默认的 DelegatingMessageSource。
+	 *  所有 getMessage() 调用都委托给它 */
 	@Nullable
 	private MessageSource messageSource;
 
-	/** Helper class used in event publishing. */
+	/** 📢 事件广播器。在 initApplicationEventMulticaster() 中按 well-known name 查找或创建默认的 SimpleApplicationEventMulticaster。
+	 *  所有 publishEvent() 调用都委托给它 */
 	@Nullable
 	private ApplicationEventMulticaster applicationEventMulticaster;
 
-	/** Application startup metrics. **/
+	/** 📊 应用启动度量（Spring 5.3+），用于追踪启动过程中各步骤的耗时 */
 	private ApplicationStartup applicationStartup = ApplicationStartup.DEFAULT;
 
-	/** Statically specified listeners. */
+	// ─────────────────── ④ 事件系统（早期事件门控机制） ───────────────────
+
+	/** 通过 addApplicationListener() 手动注册的监听器集合（区别于容器中以 Bean 形式注册的监听器！） */
 	private final Set<ApplicationListener<?>> applicationListeners = new LinkedHashSet<>();
 
-	/** Local listeners registered before refresh. */
+	/** refresh() 之前的监听器快照。用于在重复 refresh 时（传统 XML 派）恢复到初始状态 */
 	@Nullable
 	private Set<ApplicationListener<?>> earlyApplicationListeners;
 
-	/** ApplicationEvents published before the multicaster setup. */
+	/** 🚪 早期事件"门控"集合！在 prepareRefresh() 中创建（= 门开了），registerListeners() 中置 null（= 门关了）。
+	 *  门开期间发布的事件暂存在此集合中；门关时一次性补发——这就是 earlyApplicationEvents 的精髓！
+	 *  为什么需要？因为广播器在 initApplicationEventMulticaster()（第 8 步）才初始化，
+	 *  而在此之前的 prepareRefresh/obtainFreshBeanFactory 阶段可能就有事件要发布 */
 	@Nullable
 	private Set<ApplicationEvent> earlyApplicationEvents;
 
@@ -265,6 +425,10 @@ public abstract class AbstractApplicationContext extends DefaultResourceLoader
 		setParent(parent);
 	}
 
+
+	/* =======================================================================================================
+	          🔧 第一战区（续）：ApplicationContext 接口实现 —— 身份/环境/事件发布/基础查询
+	   =======================================================================================================*/
 
 	//---------------------------------------------------------------------
 	// Implementation of ApplicationContext interface
@@ -374,7 +538,18 @@ public abstract class AbstractApplicationContext extends DefaultResourceLoader
 		return this.startupDate;
 	}
 
+	/* =======================================================================================================
+	          📢 第四战区：事件发布 —— ApplicationEventPublisher 的核心实现
+	          三个 publishEvent 重载形成调用链：
+	          publishEvent(ApplicationEvent) → publishEvent(Object, ResolvableType)
+	          publishEvent(Object)           → publishEvent(Object, ResolvableType)
+	          内部逻辑：① 包装为 ApplicationEvent → ② 早期事件门控判断 → ③ 广播器分发 → ④ 父容器冒泡
+	   =======================================================================================================*/
+
 	/**
+	 * <h3>📢 publishEvent(ApplicationEvent) —— 发布强类型事件</h3>
+	 * <p>直接委托给三参数的内部方法，eventType 传 null（让框架自动推断）。</p>
+	 * <hr/>
 	 * Publish the given event to all listeners.
 	 * <p>Note: Listeners get initialized after the MessageSource, to be able
 	 * to access it within listener implementations. Thus, MessageSource
@@ -497,6 +672,12 @@ public abstract class AbstractApplicationContext extends DefaultResourceLoader
 	}
 
 
+	/* =======================================================================================================
+	          🔧 第一战区（续）：ConfigurableApplicationContext 接口实现 —— 容器的可配置能力
+	          setParent（父子容器 + 环境合并）/ addBeanFactoryPostProcessor / addApplicationListener
+	          这些方法都在 refresh() 之前调用，用于"组装"容器的配置
+	   =======================================================================================================*/
+
 	//---------------------------------------------------------------------
 	// Implementation of ConfigurableApplicationContext interface
 	//---------------------------------------------------------------------
@@ -551,7 +732,6 @@ public abstract class AbstractApplicationContext extends DefaultResourceLoader
 	}
 
 	/**
-	 * <br>
 	 * <h3>架构巅峰：Spring 启动十二步（工厂量产总指挥） 🏭</h3>
 	 * <p>
 	 * 这就是传说中的<b>“Spring 启动十二步”</b>！无论你是用传统的 XML、纯注解，亦或是
@@ -571,106 +751,81 @@ public abstract class AbstractApplicationContext extends DefaultResourceLoader
 	public void refresh() throws BeansException, IllegalStateException {
 		/*
 		 * 🛡️ 门卫大爷的铁腕：全局加锁
-		 * ---------------------------------------------------------
 		 * [工厂广播] “全厂注意，现在开始核心启动流程！期间任何人不准乱动！”
-		 * [原理解析] 防止多线程环境下，有人在工厂启动一半时试图关闭工厂或重复启动。
-		 * Spring 一上来就加上了全局同步锁 (startupShutdownMonitor)，保证启动过程的绝对安全。
+		 * [原理解析] 防止多线程环境下，有人在工厂启动一半时试图关闭工厂或重复启动。Spring 一上来就加上了全局同步锁 (startupShutdownMonitor)，保证启动过程的绝对安全。
 		 */
 		synchronized (this.startupShutdownMonitor) {
 			StartupStep contextRefresh = this.applicationStartup.start("spring.context.refresh");
 
-			/*
-			 * 🏗️ 阶段一：工厂奠基与打扫场地 (第 1-4 步)
-			 * ---------------------------------------------------------
-			 * [核心目标] 把场地腾出来，准备好最基础的工具。
-			 */
+/* =======================================🏗️ 阶段一：工厂奠基与打扫场地 (第 1-4 步)=======================================
+ * [核心目标] 把场地腾出来，准备好最基础的工具。*/
+			// 1. 打扫场地：记录工厂启动时间，检查环境变量里必须存在的属性（如数据库密码配没配）。
 			// Prepare this context for refreshing.
-			prepareRefresh();// 1. 打扫场地：记录工厂启动时间，检查环境变量里必须存在的属性（如数据库密码配没配）。
+			prepareRefresh();
 
+			// 2. 搬来核心仓库：极其关键！把大管家 DefaultListableBeanFactory（存图纸的底层仓库）拿出来并刷新。
 			// Tell the subclass to refresh the internal bean factory.
-			ConfigurableListableBeanFactory beanFactory = obtainFreshBeanFactory();// 2. 搬来核心仓库：极其关键！把大管家 DefaultListableBeanFactory（存图纸的底层仓库）拿出来并刷新。
+			ConfigurableListableBeanFactory beanFactory = obtainFreshBeanFactory();
 
+			// 3. 配置基础工具：给大管家配上类加载器、配置好 SpEL 表达式解析器，并悄悄塞进几个内部专用的零件（比如处理 ApplicationContextAware 的组件）。
 			// Prepare the bean factory for use in this context.
-			prepareBeanFactory(beanFactory);// 3. 配置基础工具：给大管家配上类加载器、配置好 SpEL 表达式解析器，并悄悄塞进几个内部专用的零件（比如处理 ApplicationContextAware 的组件）。
+			prepareBeanFactory(beanFactory);
 
 			try {
+				// 4. 子类扩展预留（钩子）：留给 Spring 子类实现的。例如 Web 容器可在此注册 Web 专属作用域。
 				// Allows post-processing of the bean factory in context subclasses.
-				postProcessBeanFactory(beanFactory); // 4. 子类扩展预留（钩子）：留给 Spring 子类实现的。例如 Web 容器可在此注册 Web 专属作用域。
+				postProcessBeanFactory(beanFactory);
 
 				StartupStep beanPostProcess = this.applicationStartup.start("spring.context.beans.post-process");
 
-				/*
-				 * 👑 阶段二：图纸大爆发！(第 5 步 —— 绝对核心 🔥)
-				 * ---------------------------------------------------------
-				 * [剧情高潮] 还记得我们最早挂在嘴边的【1号大将】(ConfigurationClassPostProcessor) 吗？
-				 * 它一直作为一张图纸躺在仓库里。就是在这第 5 步，它被正式唤醒了！
-				 * 它醒来后的第一件事，就是疯狂扫描你配置的包路径，把所有的 @Component、@Service、@Bean
-				 * 全部找出来，统统扔进 doRegisterBean 流水线里！
-				 *
-				 * [结果输出] 执行完这一步，工厂仓库里彻底堆满了所有业务 Bean 的图纸！
-				 */
+/* ======================================= 👑 阶段二：图纸大爆发！(第 5 步 —— 绝对核心 🔥)=======================================
+ * [剧情高潮] 还记得我们最早挂在嘴边的【1号大将】(ConfigurationClassPostProcessor) 吗？ 它一直作为一张图纸躺在仓库里。就是在这第 5 步，它被正式唤醒了！它醒来后的第一件事，就是疯狂扫描你配置的包路径，把所有的 @Component、@Service、@Bean 全部找出来，统统扔进 doRegisterBean 流水线里！
+ * [结果输出] 执行完这一步，工厂仓库里彻底堆满了所有业务 Bean 的图纸！*/
 				// Invoke factory processors registered as beans in the context.
 				invokeBeanFactoryPostProcessors(beanFactory);
-				/*
-				 * 👷‍♂️ 阶段三：招募流水线质检员 (第 6 步)
-				 * ---------------------------------------------------------
-				 * [剧情衔接] 图纸有了，马上要开始造对象了。但在造对象前，得先把质检员招募好。
-				 * 还记得【2号大将】(AutowiredAnnotationBeanPostProcessor 处理 @Autowired) 和【3号大将】(CommonAnnotationBeanPostProcessor 处理 @PostConstruct) 吗？
-				 * 它们在这一步被实例化，并且像守卫一样站到了流水线的两旁。
-				 * [注意] 这里只是“注册（站岗）”，并没有开始干活！它们在等后面真正的 Bean 实例化时扑上去。
-				 */
+
+/* ======================================= 👷‍♂️ 阶段三：招募流水线质检员 (第 6 步)=======================================
+ * [剧情衔接] 图纸有了，马上要开始造对象了。但在造对象前，得先把质检员招募好。还记得【2号大将】(AutowiredAnnotationBeanPostProcessor 处理 @Autowired) 和【3号大将】(CommonAnnotationBeanPostProcessor 处理 @PostConstruct) 吗？它们在这一步被实例化，并且像守卫一样站到了流水线的两旁。
+ * [注意] 这里只是“注册（站岗）”，并没有开始干活！它们在等后面真正的 Bean 实例化时扑上去。*/
 				// Register bean processors that intercept bean creation.
 				registerBeanPostProcessors(beanFactory);
 				beanPostProcess.end();
 
-				/*
-				 * 📢 阶段四：搭建厂区广播系统 (第 7-10 步)
-				 * ---------------------------------------------------------
-				 * [核心目标] 完善工厂的配套基础设施。
-				 */
+/* ======================================= 📢 阶段四：搭建厂区广播系统 (第 7-10 步)=======================================
+ * [核心目标] 完善工厂的配套基础设施。*/
+				// 7. 初始化国际化组件（让工厂能听懂多国语言）。
 				// Initialize message source for this context.
-				initMessageSource();// 7. 初始化国际化组件（让工厂能听懂多国语言）。
+				initMessageSource();
 
+				// 8. 初始化事件广播器（工厂的“大喇叭”安装完毕）。
 				// Initialize event multicaster for this context.
-				initApplicationEventMulticaster(); // 8. 初始化事件广播器（工厂的“大喇叭”安装完毕）。
+				initApplicationEventMulticaster();
 
+				// 9. 这又是一个神仙钩子方法！在 Spring Boot 中，正是这一步启动了内嵌的 Tomcat / Undertow 服务器！
 				// Initialize other special beans in specific context subclasses.
-				onRefresh(); // 9. 这又是一个神仙钩子方法！在 Spring Boot 中，正是这一步启动了内嵌的 Tomcat / Undertow 服务器！
+				onRefresh();
 
+				// 10. registerListeners()：把代码里所有实现了 ApplicationListener 的监听器（比如使用了 @EventListener 的大将 4/5 号）注册到广播器上。
 				// Check for listener beans and register them.
-				registerListeners();// 10. registerListeners()：把代码里所有实现了 ApplicationListener 的监听器（比如使用了 @EventListener 的大将 4/5 号）注册到广播器上。
+				registerListeners();
 
-				/*
-				 * 🚀 阶段五：大规模量产！(第 11 步 —— 终极核心 🔥🔥)
-				 * ---------------------------------------------------------
-				 * [厂长按下总开关] 这是 Spring 源码中代码量最大、逻辑最复杂的地方！
-				 * 大管家会巡视仓库里所有非懒加载的单例图纸 (non-lazy-init singletons)，逐一投入生产。
-				 * 在这里，你的 UserService 会被 new 出来；站岗的【2号大将】会扑上去为它注入
-				 * UserDao (依赖注入 DI)；如果有事务注解，Spring 会在这里为它生成 CGLIB 代理对象 (AOP 动态代理)。
-				 */
+/* ======================================= 🚀 阶段五：大规模量产！(第 11 步 —— 终极核心 🔥🔥)=======================================
+ * [厂长按下总开关] 这是 Spring 源码中代码量最大、逻辑最复杂的地方！ 大管家会巡视仓库里所有非懒加载的单例图纸 (non-lazy-init singletons)，逐一投入生产。
+ * 在这里，你的 UserService 会被 new 出来；站岗的【2号大将】会扑上去为它注入；UserDao (依赖注入 DI)；如果有事务注解，Spring 会在这里为它生成 CGLIB 代理对象 (AOP 动态代理)。*/
 				// Instantiate all remaining (non-lazy-init) singletons.
 				finishBeanFactoryInitialization(beanFactory);
 
-				/*
-				 * 🎉 尾声：剪彩开业 (第 12 步)
-				 * ---------------------------------------------------------
-				 * [扫尾工作] 清理无用缓存图纸，并通过大喇叭广播 ContextRefreshedEvent 事件。
-				 * 告诉全天下：“Spring 容器启动成功，可以开始接收业务请求啦！”
-				 *
-				 * 呼~ 看到这里，你是不是有一种“任督二脉被打通”的爽快感？前面我们抠了那么久的底层细节，其实全都是在为这个 refresh() 里的第 5 步和第 11 步做铺垫！
-				 * 现在，这 12 步的宏观骨架已经深深印在你的脑海里了。接下来，咱们就得挑最硬的骨头啃了。
-				 */
+/*
+ * ======================================= 🎉 尾声：剪彩开业 (第 12 步)=======================================
+ * [扫尾工作] 清理无用缓存图纸，并通过大喇叭广播 ContextRefreshedEvent 事件。 告诉全天下：“Spring 容器启动成功，可以开始接收业务请求啦！”
+ * 呼~ 看到这里，你是不是有一种“任督二脉被打通”的爽快感？前面我们抠了那么久的底层细节，其实全都是在为这个 refresh() 里的第 5 步和第 11 步做铺垫！*/
 				// Last step: publish corresponding event.
 				finishRefresh();
 			}
 
 			catch (BeansException ex) {
-				/*
-				 * 🚨 突发事故：紧急熔断与销毁
-				 * ---------------------------------------------------------
-				 * 如果在上述 12 步中发生任何异常（比如 Bean 循环依赖无法解决、配置报错），
-				 * 立即销毁已经创建出来的残次品 Bean，避免占用内存，并重置启动标识，最后向上层抛出异常。
-				 */
+				/* 🚨 突发事故：紧急熔断与销毁。
+				 * 如果在上述 12 步中发生任何异常（比如 Bean 循环依赖无法解决、配置报错），立即销毁已经创建出来的残次品 Bean，避免占用内存，并重置启动标识，最后向上层抛出异常。*/
 				if (logger.isWarnEnabled()) {
 					logger.warn("Exception encountered during context initialization - " +
 							"cancelling refresh attempt: " + ex);
@@ -687,11 +842,8 @@ public abstract class AbstractApplicationContext extends DefaultResourceLoader
 			}
 
 			finally {
-				/*
-				 * 🧹 清扫战场：重置缓存
-				 * ---------------------------------------------------------
-				 * 既然单例对象都已经造完了，图纸的反射缓存信息基本就用不上了。清空它们，释放宝贵的内存。
-				 */
+				/* 🧹 清扫战场：重置缓存。
+				 * 既然单例对象都已经造完了，图纸的反射缓存信息基本就用不上了。清空它们，释放宝贵的内存。*/
 				// Reset common introspection caches in Spring's core, since we
 				// might not ever need metadata for singleton beans anymore...
 				resetCommonCaches();
@@ -805,26 +957,32 @@ public abstract class AbstractApplicationContext extends DefaultResourceLoader
 	 * @see #getBeanFactory()
 	 */
 	protected ConfigurableListableBeanFactory obtainFreshBeanFactory() {
-		/*
-		 * 1. 刷新/校验底层工厂 (触发多态逻辑)
-		 * ---------------------------------------------------------
+		/* 1. 刷新/校验底层工厂 (触发多态逻辑)
 		 * [核心动作] 执行真正的“刷新或校验”工厂逻辑。
-		 * [原理解析] 这里会触发上述的“双重人格”逻辑。对于当前的现代注解派，
-		 * 仅仅是执行防重复刷新校验，并为工厂打上序列化 ID 标签。
-		 */
+		 * [原理解析] 这里会触发上述的“双重人格”逻辑。对于当前的现代注解派， 仅仅是执行防重复刷新校验，并为工厂打上序列化 ID 标签。*/
 		refreshBeanFactory();
 
-		/*
-		 * 2. 移交大管家钥匙
-		 * ---------------------------------------------------------
+		/* 2. 移交大管家钥匙
 		 * [核心动作] 把准备好的大管家 (DefaultListableBeanFactory) 暴露返回。
-		 * [原理解析] 返回给外层 refresh() 方法，让后面的 10 个核心步骤都能拿着
-		 * 这把钥匙（工厂实例引用）去干活。
-		 */
+		 * [原理解析] 返回给外层 refresh() 方法，让后面的 10 个核心步骤都能拿着这把钥匙（工厂实例引用）去干活。*/
 		return getBeanFactory();
 	}
 
 	/**
+	 * <h3>🚀 refresh 第 3 步：prepareBeanFactory —— 给大管家配上"标配装备"</h3>
+	 * <p>在这一步中，容器给内部 BeanFactory 配上了一套"标准装备"，分为 5 大块：</p>
+	 * <ol>
+	 * <li><b>基础设施配置</b>：ClassLoader、SpEL 表达式解析器、PropertyEditor 注册器</li>
+	 * <li><b>ApplicationContextAwareProcessor（关键！）</b>：注册一个 BPP，专门处理 6 种 Aware 接口回调
+	 * （EnvironmentAware/EmbeddedValueResolverAware/ResourceLoaderAware/ApplicationEventPublisherAware/
+	 * MessageSourceAware/ApplicationContextAware），同时 ignore 这 6 种接口的自动装配——
+	 * 因为它们由 BPP 回调注入，不走普通的 DI 流程</li>
+	 * <li><b>特殊类型的解析注册</b>：把 BeanFactory/ResourceLoader/ApplicationEventPublisher/ApplicationContext
+	 * 注册为可解析的依赖——这就是为什么你能 @Autowired ApplicationContext 的原因！</li>
+	 * <li><b>ApplicationListenerDetector</b>：注册 BPP 来自动检测和注册 ApplicationListener Bean</li>
+	 * <li><b>环境 Bean 注册</b>：把 Environment、SystemProperties、SystemEnvironment 注册为单例 Bean</li>
+	 * </ol>
+	 * <hr/>
 	 * Configure the factory's standard context characteristics,
 	 * such as the context's ClassLoader and post-processors.
 	 * @param beanFactory the BeanFactory to configure
@@ -912,48 +1070,20 @@ public abstract class AbstractApplicationContext extends DefaultResourceLoader
 	 * <p>Must be called before singleton instantiation.
 	 */
 	protected void invokeBeanFactoryPostProcessors(ConfigurableListableBeanFactory beanFactory) {
-		/*
-		 * ⚔️ 第一部分：委托执行，大将出征！(绝对核心)
-		 * ---------------------------------------------------------
-		 * [架构设计] 委托模式 (Delegate Pattern)
-		 * AbstractApplicationContext 作为厂长，他自己是不干脏活累活的。遇到这种需要把全厂所有
-		 * BeanFactoryPostProcessor（图纸修改派）找出来、排序、再依次执行的复杂逻辑，
-		 * 他直接委托给了一个专门的“执行官” —— PostProcessorRegistrationDelegate （后置处理器注册委托类）。
-		 *
-		 * [车间动作：唤醒元老 1]
-		 * 点进这个委托方法，你会发现里面极其壮观。它会去仓库里把咱们之前注册的【元老 1】找出来并调用它。
-		 * 【元老 1】醒来后干了什么？
+		/* ⚔️ 第一部分：委托执行，大将出征！(绝对核心)
+		 * [架构设计] 委托模式 (Delegate Pattern)。 AbstractApplicationContext 作为厂长，他自己是不干脏活累活的。遇到这种需要把全厂所有 BeanFactoryPostProcessor（图纸修改派）找出来、排序、再依次执行的复杂逻辑，他直接委托给了一个专门的“执行官” —— PostProcessorRegistrationDelegate （后置处理器注册委托类）。
+		 * [车间动作：唤醒元老 1] 点进这个委托方法，你会发现里面极其壮观。它会去仓库里把咱们之前注册的【元老 1】找出来并调用它。【元老 1】醒来后干了什么？
 		 * ① 它拿起你写的 AppConfig.class 图纸。
-		 * ② 看到上面写着 @ComponentScan("com.xxx")，它立刻化身超级吸尘器，冲进你的包路径，
-		 * 把所有带 @Component、@Service、@Controller 的 .class 文件全扫出来！
-		 * ③ 扫出来后，它会调用咱们上一轮学的 doRegisterBean 流水线，把它们全部变成一张张新鲜的
-		 * BeanDefinition 图纸，疯狂地塞进大管家底层的 ConcurrentHashMap 仓库里！
-		 *
-		 * 👉 [阶段结论]
-		 * 执行完这一行代码，咱们的仓库就不再只有几个基础设施图纸了，而是堆满了你写的成百上千个业务 Bean 的图纸！
-		 */
+		 * ② 看到上面写着 @ComponentScan("com.xxx")，它立刻化身超级吸尘器，冲进你的包路径，把所有带 @Component、@Service、@Controller 的 .class 文件全扫出来！
+		 * ③ 扫出来后，它会调用咱们上一轮学的 doRegisterBean 流水线，把它们全部变成一张张新鲜的 BeanDefinition 图纸，疯狂地塞进大管家底层的 ConcurrentHashMap 仓库里！
+		 * [阶段结论] 执行完这一行代码，咱们的仓库就不再只有几个基础设施图纸了，而是堆满了你写的成百上千个业务 Bean 的图纸！*/
 		PostProcessorRegistrationDelegate.invokeBeanFactoryPostProcessors(beanFactory, getBeanFactoryPostProcessors());
 
-		/*
-		 * 🕸️ 第二部分：黑科技埋伏 —— AOP 编织准备 (LoadTimeWeaver)
-		 * ---------------------------------------------------------
-		 * [原理解析] 这段代码处理的是 Spring 中相对高级且底层的特性：LTW (类加载期织入)。
-		 * 平时用 AOP 多半是运行期生成代理（CGLIB/JDK 动态代理）。而 LTW 是一种更狠的技术，
-		 * 它是在 JVM 刚刚把 .class 文件加载进内存的那一瞬间，直接修改字节码，把切面逻辑“塞”进去（通常配合 AspectJ 使用）.
-		 *
-		 * [条件一：原生镜像兼容] !NativeDetector.inNativeImage()
-		 * 这是 Spring 5.3 专门为 GraalVM Native Image （原生镜像）做的兼容。
-		 * 原生镜像是提前编译好的二进制文件，不支持在运行时动态加载和修改字节码。所以如果是原生镜像环境，直接跳过。
-		 *
-		 * [条件二：LTW 激活检测] beanFactory.containsBean(...)
-		 * 如果【元老 1】刚才扫包时发现你用了 @EnableLoadTimeWeaving 注解，就会进入这个 if 分支。
-		 *
-		 * [车间大白话：临时装扮]
-		 * 如果满足条件，工厂会给你配一个临时类加载器 (TempClassLoader)。为什么要临时的？
-		 * 因为你想修改类的字节码，总得先把它加载进来看看吧？如果用正式的类加载器看一眼，
-		 * 这个类就被永久定型了，没法改了。所以得用一个临时的去“偷瞄”一眼，改好字节码后，
-		 * 再交给正式的去加载。
-		 */
+		/* 🕸️ 第二部分：黑科技埋伏 —— AOP 编织准备 (LoadTimeWeaver)
+		 * [原理解析] 这段代码处理的是 Spring 中相对高级且底层的特性：LTW (类加载期织入)。 平时用 AOP 多半是运行期生成代理（CGLIB/JDK 动态代理）。而 LTW 是一种更狠的技术，它是在 JVM 刚刚把 .class 文件加载进内存的那一瞬间，直接修改字节码，把切面逻辑“塞”进去（通常配合 AspectJ 使用）.
+		 * [条件一：原生镜像兼容] !NativeDetector.inNativeImage()  这是 Spring 5.3 专门为 GraalVM Native Image （原生镜像）做的兼容。原生镜像是提前编译好的二进制文件，不支持在运行时动态加载和修改字节码。所以如果是原生镜像环境，直接跳过。
+		 * [条件二：LTW 激活检测]  beanFactory.containsBean(...) 如果【元老 1】刚才扫包时发现你用了 @EnableLoadTimeWeaving 注解，就会进入这个 if 分支。
+		 * [车间大白话：临时装扮]  如果满足条件，工厂会给你配一个临时类加载器 (TempClassLoader)。为什么要临时的？因为你想修改类的字节码，总得先把它加载进来看看吧？如果用正式的类加载器看一眼，这个类就被永久定型了，没法改了。所以得用一个临时的去“偷瞄”一眼，改好字节码后，再交给正式的去加载。*/
 		// Detect a LoadTimeWeaver and prepare for weaving, if found in the meantime
 		// (e.g. through an @Bean method registered by ConfigurationClassPostProcessor)
 		if (!NativeDetector.inNativeImage() && beanFactory.getTempClassLoader() == null &&
@@ -962,17 +1092,9 @@ public abstract class AbstractApplicationContext extends DefaultResourceLoader
 			beanFactory.setTempClassLoader(new ContextTypeMatchClassLoader(beanFactory.getBeanClassLoader()));
 		}
 
-		/*
-		 * 🎉 [第 5 步收官总结]
-		 * ---------------------------------------------------------
-		 * 现在你可以长舒一口气了！经过这第 5 步的洗礼，咱们工厂的图纸总算全部画齐了！
-		 * 无论是你手写的 @Bean，还是包扫描进来的 @Service，它们现在都已经作为完整的
-		 * BeanDefinition 在大管家的仓库里列队完毕，只等被实例化！
-		 *
-		 * (注：这段代码看似简单，但它调用的 PostProcessorRegistrationDelegate 内部其实
-		 * 隐藏着几百行极其精妙的“接口排序与分组执行”逻辑，完美处理了 PriorityOrdered、
-		 * Ordered 接口的优先级。)
-		 */
+		/* 🎉 [容器刷新第 5 步总结]
+		 * 现在你可以长舒一口气了！经过这第 5 步的洗礼，咱们工厂的图纸总算全部画齐了！ 无论是你手写的 @Bean，还是包扫描进来的 @Service，它们现在都已经作为完整的BeanDefinition 在大管家的仓库里列队完毕，只等被实例化！
+		 * (注：这段代码看似简单，但它调用的 PostProcessorRegistrationDelegate 内部其实隐藏着几百行极其精妙的“接口排序与分组执行”逻辑，完美处理了 PriorityOrdered、 Ordered 接口的优先级。)*/
 	}
 
 	/**
@@ -1109,10 +1231,28 @@ public abstract class AbstractApplicationContext extends DefaultResourceLoader
 	}
 
 	/**
+	 * <h3>架构巅峰：决战前的最后 6 秒倒数 (容器刷新第 11 步收尾) 🚀</h3>
+	 * <p>
+	 * 经过前面漫长、严谨、甚至有些枯燥的“画图纸”（第 5 步）和“招募质检员”（第 6 步）的筹备工作，
+	 * 现在，我们正式踏入了 Spring 启动流程的绝对高潮——<b>第 11 步：finishBeanFactoryInitialization！</b>
+	 * 翻译过来就是：完成工厂初始化的最后收尾，并拉下全自动生产线的总电闸！
+	 * </p>
+	 * <p>
+	 * 这段代码看似平平无奇，但它就像火箭发射前的最后 6 秒倒数。
+	 * 每一行都在为最后那一脚“点火”做着极其关键的清场和确认工作。让我们戴上安全帽，
+	 * 最后一次检查这 6 道点火工序：
+	 * </p>
+	 * <br>
+	 * <hr>
+	 * <p><b>[Original Spring Documentation]</b></p>
 	 * Finish the initialization of this context's bean factory,
 	 * initializing all remaining singleton beans.
 	 */
 	protected void finishBeanFactoryInitialization(ConfigurableListableBeanFactory beanFactory) {
+		/* 🗣️ 倒数第 6 秒：成立“通用翻译部” (ConversionService)
+		 * Spring 的类型转换服务（ConversionService）
+		 * [车间大白话] 厂长说：“等会儿造机器注入属性时，XML 或注解里写的可全是字符串(String)啊！ 比如 <property name="age" value="18"/>，但我对象里要的是个 Integer！”
+		 * [原理解析] 所以，这里先去仓库里看看有没有配好的“通用翻译部”(ConversionService 转换器)。如果有，赶紧装配到大管家身上，等会儿造机器时随时调用它来做类型转换。*/
 		// Initialize conversion service for this context.
 		if (beanFactory.containsBean(CONVERSION_SERVICE_BEAN_NAME) &&
 				beanFactory.isTypeMatch(CONVERSION_SERVICE_BEAN_NAME, ConversionService.class)) {
@@ -1120,6 +1260,9 @@ public abstract class AbstractApplicationContext extends DefaultResourceLoader
 					beanFactory.getBean(CONVERSION_SERVICE_BEAN_NAME, ConversionService.class));
 		}
 
+		/* 🕵️‍♂️ 倒数第 5 秒：设立“密码破译局” (EmbeddedValueResolver)
+		 * [车间大白话] 代码里写了 @Value("${mysql.url}")，Spring 得知道去哪查这个值啊！ 如果之前没人注册过这种“破译员”，工厂就在这里紧急设立一个默认的“密码破译局”。
+		 * [原理解析] 它的任务就是拿着 ${xxx} 占位符，去 Environment (环境大管家，我们在第 5 步看它加载了 properties) 里把真实的值翻译出来。这主要用于后续注解属性值的极速解析。*/
 		// Register a default embedded value resolver if no BeanFactoryPostProcessor
 		// (such as a PropertySourcesPlaceholderConfigurer bean) registered any before:
 		// at this point, primarily for resolution in annotation attribute values.
@@ -1127,20 +1270,39 @@ public abstract class AbstractApplicationContext extends DefaultResourceLoader
 			beanFactory.addEmbeddedValueResolver(strVal -> getEnvironment().resolvePlaceholders(strVal));
 		}
 
+		/* 🧙‍♂️ 倒数第 4 秒：提前唤醒“底层魔法师” (LoadTimeWeaverAware 类加载期织入的 AOP)
+		 * [车间大白话] 这类魔法师（AspectJ 相关的字节码修改器）极其特殊，必须在绝大多数普通机器(Bean)被加载进 JVM 之前就醒过来，否则他们就没法修改别人的字节码了！
+		 * [原理解析] 处理 LTW (类加载期织入) 的 AOP。厂长特批，用 getBean() 强行把他们提前实例化，以便尽早注册他们的 ClassFileTransformer 进行字节码修改。 */
 		// Initialize LoadTimeWeaverAware beans early to allow for registering their transformers early.
 		String[] weaverAwareNames = beanFactory.getBeanNamesForType(LoadTimeWeaverAware.class, false, false);
 		for (String weaverAwareName : weaverAwareNames) {
+			// 提前实例化！
 			getBean(weaverAwareName);
 		}
 
+		/* 🗑️ 倒数第 3 秒：砸毁“临时透视仪” (TempClassLoader)
+		 * [车间大白话] 第 5 步开头为了不提前把类定型，工厂装了个“临时类加载器”去偷瞄字节码。 马上要动真格造真实的 Java 对象了。厂长一声令下：把临时透视仪砸了！全厂统一使用标准的正式类加载器！
+		 * [原理解析] 释放临时类加载器，停止基于临时加载器的类型匹配，节约内存并彻底锁定类加载环境。*/
 		// Stop using the temporary ClassLoader for type matching.
 		beanFactory.setTempClassLoader(null);
 
+		/* 🔒 倒数第 2 秒：彻底封锁“图纸档案馆” (freezeConfiguration 极其重要)
+		 * [车间大白话] 这也是极其关键的性能优化！厂长给档案馆上了一把大锁，并对着全厂广播：“从这一秒开始，任何人都绝对不允许再去修改图纸(BeanDefinition)的任何一个标点符号！” 因为马上要批量造机器了，如果有人一边造机器一边改图纸，那就全乱套了。
+		 * [原理解析] 冻结所有的 BeanDefinition 配置。Spring 内部会把这些图纸的关键信息缓存到一个极速的数组/集合里，不再预期有修改，等会儿 new 对象时读取图纸元数据的速度将飙升到极致！*/
 		// Allow for caching all bean definition metadata, not expecting further changes.
 		beanFactory.freezeConfiguration();
 
+		/* 🚀 倒数第 1 秒：拉下总电闸！全面开工！ (终极大招 🔥)
+		 * [车间大白话] 这是整个 Spring 框架中最震耳欲聋的一声巨响！ 所有的前置条件完美具备，厂长拉下了这根名为 preInstantiateSingletons 的总电闸。 整个工厂的流水线瞬间爆发出惊人的轰鸣声！大管家将拿着那几百张冻结的图纸，冲向单例池，一个接一个地把你的 @Service、@Controller、@Component 全部 new 出来，并打上 @Autowired 的补丁！
+		 * [原理解析] 预实例化所有剩余的、非懒加载 (non-lazy-init) 的单例 Bean！ */
 		// Instantiate all remaining (non-lazy-init) singletons.
 		beanFactory.preInstantiateSingletons();
+
+/* ===================================💥 [大决战预告：深渊的凝视]==============================================
+ * 厂长，手握核弹起爆器，准备好了吗？ 这段 finishBeanFactoryInitialization 方法，其实就是大决战前的最后一次深呼吸。
+ * 它本身并没有写一行具体怎么 new 对象的代码，它把所有的悬念和极其恐怖的工作量，全部扔进了最后那一行：preInstantiateSingletons()。
+ * 接下来，没有任何退路！那是全网所有 Spring 开发者梦寐以求、也是最容易迷失的终极迷宫。 里面藏着大名鼎鼎的 getBean()、doGetBean()、createBean()、doCreateBean()，以及解决循环依赖的“三级缓存”！
+ */
 	}
 
 	/**
@@ -1194,6 +1356,13 @@ public abstract class AbstractApplicationContext extends DefaultResourceLoader
 		CachedIntrospectionResults.clearClassLoader(getClassLoader());
 	}
 
+
+	/* =======================================================================================================
+	          🛑 第三战区：关闭与销毁 —— 优雅停机的完整编排
+	          close() → doClose() 是关闭的核心链路，内部按序执行：
+	          ① 发布 ContextClosedEvent → ② 停止 Lifecycle Bean → ③ 销毁所有单例 →
+	          ④ 关闭 BeanFactory → ⑤ onClose 子类钩子 → ⑥ 清缓存 → ⑦ 置为 inactive
+	   =======================================================================================================*/
 
 	/**
 	 * Register a shutdown hook {@linkplain Thread#getName() named}
@@ -1258,6 +1427,30 @@ public abstract class AbstractApplicationContext extends DefaultResourceLoader
 	}
 
 	/**
+	 * <h3>🛑 doClose() —— 容器关闭的"拆弹 7 步"（与 refresh 12 步对称的终止流程）</h3>
+	 * <p><b>【硬核释义】</b><br/>
+	 * 这是容器关闭的核心执行方法，close() 和 JVM shutdown hook 都会调到这里。<br/>
+	 * 用 CAS（closed.compareAndSet）保证只执行一次，按序执行 7 步拆弹：</p>
+	 * <ol>
+	 * <li><b>发布 ContextClosedEvent</b>——通知所有监听器"容器要关了"（@TransactionalEventListener BEFORE_CLOSE 在这里触发）</li>
+	 * <li><b>停止 Lifecycle Bean</b>——LifecycleProcessor.onClose() 按 phase 倒序停止 SmartLifecycle Bean</li>
+	 * <li><b>销毁所有单例</b>——destroyBeans() → destroySingletons()，触发 @PreDestroy、DisposableBean.destroy()</li>
+	 * <li><b>关闭 BeanFactory</b>——closeBeanFactory()，清除序列化 ID（现代派）或置 null（传统派）</li>
+	 * <li><b>子类钩子 onClose()</b>——Spring Boot 在这里关闭内嵌 Tomcat/Undertow</li>
+	 * <li><b>清除反射缓存</b>——防止类加载器泄漏</li>
+	 * <li><b>置为 inactive</b>——active.set(false)，此后所有 getBean 调用都会报错</li>
+	 * </ol>
+	 * <blockquote><b>【车间大白话】 🏭</b><br/>
+	 * 工厂要关门了！按顺序执行"拆弹"流程：<br/>
+	 * ① 广播通知："全员撤离！"（ContextClosedEvent）<br/>
+	 * ② 先关掉所有还在运转的机器（Lifecycle Bean 按 phase 倒序停机）<br/>
+	 * ③ 逐台拆解所有单例机器（触发销毁回调，释放连接池/线程池等资源）<br/>
+	 * ④ 封存仓库（关闭 BeanFactory）<br/>
+	 * ⑤ 子工厂做最后清理（如 Spring Boot 关 Tomcat）<br/>
+	 * ⑥ 清扫缓存、防止内存泄漏<br/>
+	 * ⑦ 挂上"已歇业"牌子（active=false）<br/>
+	 * <b>注意：每一步都有 try-catch 容错！单个步骤失败不会阻止后续步骤执行，确保资源尽量被释放！</b></blockquote>
+	 * <hr/>
 	 * Actually performs context closing: publishes a ContextClosedEvent and
 	 * destroys the singletons in the bean factory of this application context.
 	 * <p>Called by both {@code close()} and a JVM shutdown hook, if any.
@@ -1268,17 +1461,23 @@ public abstract class AbstractApplicationContext extends DefaultResourceLoader
 	 */
 	@SuppressWarnings("deprecation")
 	protected void doClose() {
+		/*
+		 * 🛡️ CAS 幂等保护：active=true 且 closed 从 false→true 才执行，保证只关一次。
+		 * 即使 close() 和 shutdownHook 并发触发，也只有一个线程能进入。
+		 */
 		// Check whether an actual close attempt is necessary...
 		if (this.active.get() && this.closed.compareAndSet(false, true)) {
 			if (logger.isDebugEnabled()) {
 				logger.debug("Closing " + this);
 			}
 
+			// 🧹 从 LiveBeansView MBean 中注销（JMX 管理）
 			if (!NativeDetector.inNativeImage()) {
 				LiveBeansView.unregisterApplicationContext(this);
 			}
 
 			try {
+				// ① 发布 ContextClosedEvent——最后的广播，让监听器做清理工作
 				// Publish shutdown event.
 				publishEvent(new ContextClosedEvent(this));
 			}
@@ -1286,6 +1485,7 @@ public abstract class AbstractApplicationContext extends DefaultResourceLoader
 				logger.warn("Exception thrown from ApplicationListener handling ContextClosedEvent", ex);
 			}
 
+			// ② 停止所有 Lifecycle Bean（按 phase 倒序排空）
 			// Stop all Lifecycle beans, to avoid delays during individual destruction.
 			if (this.lifecycleProcessor != null) {
 				try {
@@ -1296,24 +1496,30 @@ public abstract class AbstractApplicationContext extends DefaultResourceLoader
 				}
 			}
 
+			// ③ 销毁所有缓存的单例 Bean（触发 @PreDestroy / DisposableBean.destroy / destroy-method）
 			// Destroy all cached singletons in the context's BeanFactory.
 			destroyBeans();
 
+			// ④ 关闭 BeanFactory 本身（现代派清序列化 ID，传统派置 null）
 			// Close the state of this context itself.
 			closeBeanFactory();
 
+			// ⑤ 子类钩子——Spring Boot 在这里关闭内嵌 Web 服务器
 			// Let subclasses do some final clean-up if they wish...
 			onClose();
 
+			// ⑥ 清除反射/注解/ResolvableType 等缓存，防止类加载器泄漏
 			// Reset common introspection caches to avoid class reference leaks.
 			resetCommonCaches();
 
+			// 恢复监听器到 refresh 之前的状态（传统 XML 派支持重复 refresh 时需要）
 			// Reset local application listeners to pre-refresh state.
 			if (this.earlyApplicationListeners != null) {
 				this.applicationListeners.clear();
 				this.applicationListeners.addAll(this.earlyApplicationListeners);
 			}
 
+			// ⑦ 挂上"已歇业"牌子——此后所有 getBean 调用都会触发 assertBeanFactoryActive() 报错
 			// Switch to inactive.
 			this.active.set(false);
 		}
@@ -1371,6 +1577,12 @@ public abstract class AbstractApplicationContext extends DefaultResourceLoader
 		}
 	}
 
+
+	/* =======================================================================================================
+	          🔀 第五战区：BeanFactory 方法代理 —— 所有 getBean/containsBean 等操作都委托给内部 BeanFactory
+	          注意：每个方法都先调 assertBeanFactoryActive() 做活性检查！
+	          容器未 refresh 或已 close 时调用任何 getBean 都会直接报 IllegalStateException
+	   =======================================================================================================*/
 
 	//---------------------------------------------------------------------
 	// Implementation of BeanFactory interface
@@ -1570,6 +1782,13 @@ public abstract class AbstractApplicationContext extends DefaultResourceLoader
 	}
 
 
+	/* =======================================================================================================
+	          🔀 第五战区（续）：HierarchicalBeanFactory 代理 —— 父子容器层级查找
+	          getParentBeanFactory() 返回父容器（可能是另一个 ApplicationContext）
+	          containsLocalBean() 只在当前容器内查找，不向父容器回溯
+	          getInternalParentBeanFactory() 内部方法，尝试获取父容器的"真正 BeanFactory"
+	   =======================================================================================================*/
+
 	//---------------------------------------------------------------------
 	// Implementation of HierarchicalBeanFactory interface
 	//---------------------------------------------------------------------
@@ -1586,6 +1805,11 @@ public abstract class AbstractApplicationContext extends DefaultResourceLoader
 	}
 
 	/**
+	 * <h3>内部方法：获取父容器的"真正 BeanFactory"</h3>
+	 * <p>如果父容器也是 ConfigurableApplicationContext，返回它内部的 BeanFactory（更底层、更高效）；<br/>
+	 * 否则返回父容器本身（它自己就是 BeanFactory）。<br/>
+	 * 这个方法用于设置内部 BeanFactory 的 parentBeanFactory——让 getBean 的父子查找链路走最短路径。</p>
+	 * <hr/>
 	 * Return the internal bean factory of the parent context if it implements
 	 * ConfigurableApplicationContext; else, return the parent context itself.
 	 * @see org.springframework.context.ConfigurableApplicationContext#getBeanFactory
@@ -1596,6 +1820,10 @@ public abstract class AbstractApplicationContext extends DefaultResourceLoader
 				((ConfigurableApplicationContext) getParent()).getBeanFactory() : getParent());
 	}
 
+
+	/* =======================================================================================================
+	          🌍 第六战区：MessageSource 方法代理 —— 国际化消息解析全部委托给内部 messageSource
+	   =======================================================================================================*/
 
 	//---------------------------------------------------------------------
 	// Implementation of MessageSource interface
@@ -1640,6 +1868,10 @@ public abstract class AbstractApplicationContext extends DefaultResourceLoader
 	}
 
 
+	/* =======================================================================================================
+	          🔍 ResourcePatternResolver 代理 —— classpath*: 通配符资源加载
+	   =======================================================================================================*/
+
 	//---------------------------------------------------------------------
 	// Implementation of ResourcePatternResolver interface
 	//---------------------------------------------------------------------
@@ -1649,6 +1881,12 @@ public abstract class AbstractApplicationContext extends DefaultResourceLoader
 		return this.resourcePatternResolver.getResources(locationPattern);
 	}
 
+
+	/* =======================================================================================================
+	          🔄 Lifecycle 代理 —— 容器的启动/停止生命周期
+	          start() 和 stop() 委托给 LifecycleProcessor，并分别发布 ContextStartedEvent/ContextStoppedEvent
+	          注意区分：start/stop 是"运行态"切换（可反复调用），close 是"终止"（不可逆）
+	   =======================================================================================================*/
 
 	//---------------------------------------------------------------------
 	// Implementation of Lifecycle interface
@@ -1672,11 +1910,18 @@ public abstract class AbstractApplicationContext extends DefaultResourceLoader
 	}
 
 
-	//---------------------------------------------------------------------
-	// Abstract methods that must be implemented by subclasses
-	//---------------------------------------------------------------------
+	/* =======================================================================================================
+	          🔧 第七战区：抽象方法 —— 两大流派的分水岭！
+	          这三个抽象方法决定了"BeanFactory 从哪来、怎么刷新、怎么关闭"——
+	          传统 XML 派和现代注解派在这里走向完全不同的道路！
+	   =======================================================================================================*/
 
 	/**
+	 * <h3>🔧 抽象方法 1：refreshBeanFactory() —— 两大流派的核心分歧点！</h3>
+	 * <p><b>传统 XML 派（AbstractRefreshableApplicationContext）</b>：销毁旧工厂 → 创建新 DefaultListableBeanFactory → 重新加载 XML 配置。<br/>
+	 * <b>现代注解派（GenericApplicationContext）</b>：CAS 防重刷（只允许调一次）→ 设置序列化 ID，完毕。<br/>
+	 * 同一个方法签名，两种截然不同的行为——这就是模板方法 + 多态的威力！</p>
+	 * <hr/>
 	 * Subclasses must implement this method to perform the actual configuration load.
 	 * The method is invoked by {@link #refresh()} before any other initialization work.
 	 * <p>A subclass will either create a new bean factory and hold a reference to it,
@@ -1689,6 +1934,10 @@ public abstract class AbstractApplicationContext extends DefaultResourceLoader
 	protected abstract void refreshBeanFactory() throws BeansException, IllegalStateException;
 
 	/**
+	 * <h3>🔧 抽象方法 2：closeBeanFactory() —— 释放内部 BeanFactory</h3>
+	 * <p><b>传统 XML 派</b>：把内部 BeanFactory 引用置 null，彻底释放。<br/>
+	 * <b>现代注解派（GenericApplicationContext）</b>：只清除序列化 ID，不释放 BeanFactory（因为它是 final 字段）。</p>
+	 * <hr/>
 	 * Subclasses must implement this method to release their internal bean factory.
 	 * This method gets invoked by {@link #close()} after all other shutdown work.
 	 * <p>Should never throw an exception but rather log shutdown failures.
@@ -1696,6 +1945,12 @@ public abstract class AbstractApplicationContext extends DefaultResourceLoader
 	protected abstract void closeBeanFactory();
 
 	/**
+	 * <h3>🔧 抽象方法 3：getBeanFactory() —— 获取内部 BeanFactory 实例</h3>
+	 * <p>所有 getBean/getBeanNamesForType 等代理方法最终都调到这里获取内部 BeanFactory。<br/>
+	 * <b>传统 XML 派</b>：从 volatile 字段中读取（可能为 null，需要检查）。<br/>
+	 * <b>现代注解派</b>：直接返回 final 字段（永不为 null，性能极高）。<br/>
+	 * 这个方法被频繁调用，子类实现必须高效——不能有锁、不能有重计算！</p>
+	 * <hr/>
 	 * Subclasses must return their internal bean factory here. They should implement the
 	 * lookup efficiently, so that it can be called repeatedly without a performance penalty.
 	 * <p>Note: Subclasses should check whether the context is still active before
