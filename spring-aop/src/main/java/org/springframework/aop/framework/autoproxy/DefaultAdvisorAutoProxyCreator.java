@@ -20,6 +20,34 @@ import org.springframework.beans.factory.BeanNameAware;
 import org.springframework.lang.Nullable;
 
 /**
+ * <h1>🗺️ 一、架构坐标·全局定位</h1>
+ * <h2>DefaultAdvisorAutoProxyCreator —— "扫描所有 Advisor Bean 自动代理"的默认实现！</h2>
+ * <ul>
+ * <li><b>全限定名</b>：{@code org.springframework.aop.framework.autoproxy.DefaultAdvisorAutoProxyCreator}</li>
+ * <li><b>中文名</b>：默认 Advisor 自动代理创建器 —— 简单粗暴：找到容器里所有 Advisor，自动匹配、自动代理</li>
+ * <li><b>所属车间 🏭</b>：{@code spring-aop} 模块的 {@code framework.autoproxy} 包
+ *     （autoproxy 包 = 自动代理基础设施）</li>
+ * <li><b>定位</b>：继承链中间层的"开箱即用版"，不用写任何自定义逻辑，注册到容器就能自动工作</li>
+ * </ul>
+ *
+ * <h3>💡 与 AnnotationAwareAspectJAutoProxyCreator 的区别</h3>
+ * <ul>
+ * <li><b>DefaultAdvisorAutoProxyCreator</b>：只处理已经是 {@code Advisor} 类型的 Bean（你自己编程式注册的 Advisor）</li>
+ * <li><b>AnnotationAwareAspectJAutoProxyCreator</b>：除了 Advisor Bean，还能<b>解析 @Aspect 注解类</b>生成 Advisor</li>
+ * </ul>
+ * <p>现代 Spring 项目几乎都用 @Aspect 注解，所以实际生产中 AnnotationAwareAspectJAutoProxyCreator 用得更多。<br/>
+ * DefaultAdvisorAutoProxyCreator 更多出现在纯编程式 AOP 或老项目中。</p>
+ *
+ * <h3>🧬 继承体系定位</h3>
+ * <pre>
+ * AbstractAutoProxyCreator
+ *   └── AbstractAdvisorAutoProxyCreator
+ *         ├── DefaultAdvisorAutoProxyCreator    ← 👈 你在这里！（纯 Advisor Bean 扫描）
+ *         └── AspectJAwareAdvisorAutoProxyCreator
+ *               └── AnnotationAwareAspectJAutoProxyCreator（终极版：@Aspect 注解 + Advisor Bean）
+ * </pre>
+ *
+ * <hr/>
  * {@code BeanPostProcessor} implementation that creates AOP proxies based on all
  * candidate {@code Advisor}s in the current {@code BeanFactory}. This class is
  * completely generic; it contains no special code to handle any particular aspects,

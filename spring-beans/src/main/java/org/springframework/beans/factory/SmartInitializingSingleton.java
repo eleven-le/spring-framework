@@ -17,6 +17,40 @@
 package org.springframework.beans.factory;
 
 /**
+ * <h1>🗺️ 一、架构坐标·全局定位</h1>
+ * <h2>"所有单例就绪后"的回调——比 InitializingBean 更晚，确保全局无遗漏！</h2>
+ * <ul>
+ * <li><b>全限定名</b>：{@code org.springframework.beans.factory.SmartInitializingSingleton}</li>
+ * <li><b>中文名</b>：智能单例初始化回调 —— 全员到齐后的"点名确认"</li>
+ * <li><b>所属车间 🏭</b>：{@code spring-beans} 模块的 factory 包（factory 包 = 用户可见的工厂契约）</li>
+ * <li><b>接口层级</b>：顶级接口，4.1 引入，与 InitializingBean 互补</li>
+ * </ul>
+ *
+ * <h3>💡 SmartInitializingSingleton vs InitializingBean vs ContextRefreshedEvent</h3>
+ * <table border="1" cellpadding="5" cellspacing="0">
+ * <tr><th>对比</th><th>InitializingBean</th><th>SmartInitializingSingleton（本接口）</th><th>ContextRefreshedEvent</th></tr>
+ * <tr><td>触发时机</td><td>当前 Bean 初始化时</td><td>所有单例初始化完毕后</td><td>refresh() 最末尾</td></tr>
+ * <tr><td>能否安全 getBeansOfType</td><td>不安全（可能触发早期初始化）</td><td>安全（全部就绪）</td><td>安全</td></tr>
+ * <tr><td>依赖层级</td><td>spring-beans</td><td>spring-beans</td><td>spring-context</td></tr>
+ * <tr><td>典型使用者</td><td>框架内部大量使用</td><td>EventListenerMethodProcessor</td><td>应用层常用</td></tr>
+ * </table>
+ *
+ * <h3>🧬 在 refresh 中的执行位置</h3>
+ * <pre>
+ * refresh()
+ * └── finishBeanFactoryInitialization(beanFactory)
+ *     └── beanFactory.preInstantiateSingletons()
+ *         ├── 第一轮：逐个 getBean() 创建所有非 lazy 单例
+ *         └── 第二轮：遍历所有 SmartInitializingSingleton  ← 👈 你在这里！
+ *              └── smartSingleton.afterSingletonsInstantiated()
+ * </pre>
+ *
+ * <h3>🎯 战略复盘</h3>
+ * <p>SmartInitializingSingleton 解决了 InitializingBean 的痛点——单个 Bean 初始化时，
+ * 其他 Bean 可能还没创建。本接口保证"全员到齐"后才回调，适合需要全局视角的初始化逻辑。
+ * 典型案例：EventListenerMethodProcessor 在此时扫描所有 Bean 上的 @EventListener 方法并注册监听器。</p>
+ *
+ * <hr/>
  * Callback interface triggered at the end of the singleton pre-instantiation phase
  * during {@link BeanFactory} bootstrap. This interface can be implemented by
  * singleton beans in order to perform some initialization after the regular

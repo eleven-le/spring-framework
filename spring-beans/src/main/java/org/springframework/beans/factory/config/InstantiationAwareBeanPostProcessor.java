@@ -23,6 +23,46 @@ import org.springframework.beans.PropertyValues;
 import org.springframework.lang.Nullable;
 
 /**
+ * <h1>🗺️ 一、架构坐标·全局定位</h1>
+ * <h2>BPP 的"实例化级特种兵"——在 Bean 实例化前后 + 属性注入阶段插入钩子！</h2>
+ * <ul>
+ * <li><b>全限定名</b>：{@code org.springframework.beans.factory.config.InstantiationAwareBeanPostProcessor}</li>
+ * <li><b>中文名</b>：具备实例化感知能力的 Bean 后置处理器 —— 生产线的"实例化工位质检员"</li>
+ * <li><b>所属车间 🏭</b>：{@code spring-beans} 模块的 config 包（config 包 = 框架内部配置契约）</li>
+ * <li><b>接口层级</b>：{@code BeanPostProcessor} 的子接口，新增 <b>3 个方法</b></li>
+ * </ul>
+ *
+ * <h3>💡 BPP vs InstantiationAwareBPP——介入时机的根本区别</h3>
+ * <pre>
+ * createBean() {
+ *   ★ postProcessBeforeInstantiation()     ← 👈 实例化前！可返回代理短路整个创建流程
+ *   doCreateBean() {
+ *     createBeanInstance()                  ← 反射创建原始对象
+ *     ★ postProcessAfterInstantiation()     ← 👈 实例化后、注入前！返回 false 跳过属性注入
+ *     populateBean() {
+ *       ★ postProcessProperties()           ← 👈 属性注入阶段！@Autowired 在此执行
+ *     }
+ *     initializeBean() {
+ *       postProcessBeforeInitialization()   ← 普通 BPP 前置（@PostConstruct）
+ *       postProcessAfterInitialization()    ← 普通 BPP 后置（AOP 代理）
+ *     }
+ *   }
+ * }
+ * </pre>
+ *
+ * <h3>🧬 3 个新增方法</h3>
+ * <table border="1" cellpadding="5" cellspacing="0">
+ * <tr><th>方法</th><th>时机</th><th>典型用途</th></tr>
+ * <tr><td>postProcessBeforeInstantiation</td><td>实例化前</td><td>AOP 短路（返回代理跳过 doCreateBean）</td></tr>
+ * <tr><td>postProcessAfterInstantiation</td><td>实例化后、注入前</td><td>返回 false 跳过 populateBean（极少使用）</td></tr>
+ * <tr><td>postProcessProperties</td><td>属性注入阶段</td><td><b>@Autowired/@Value 真正执行处！</b>（AABPP 在此介入）</td></tr>
+ * </table>
+ *
+ * <h3>🎯 战略复盘</h3>
+ * <p>InstantiationAwareBPP 把 BPP 的介入点从"初始化前后"扩展到"实例化前后 + 属性注入"，
+ * 覆盖 Bean 生命周期的更早阶段。@Autowired 注入、AOP 短路等核心特性都依赖此接口。</p>
+ *
+ * <hr/>
  * Subinterface of {@link BeanPostProcessor} that adds a before-instantiation callback,
  * and a callback after instantiation but before explicit properties are set or
  * autowiring occurs.

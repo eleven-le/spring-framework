@@ -21,6 +21,53 @@ import java.io.Flushable;
 import org.springframework.core.Ordered;
 
 /**
+ * <h1>🗺️ 一、架构坐标·全局定位</h1>
+ * <h2>TransactionSynchronization —— 事务同步回调接口，afterCommit/afterCompletion 的契约！</h2>
+ * <ul>
+ * <li><b>全限定名</b>：{@code org.springframework.transaction.support.TransactionSynchronization}</li>
+ * <li><b>中文名</b>：事务同步 —— 在事务提交/回滚/完成等关键时刻触发回调的接口</li>
+ * <li><b>所属车间 🏭</b>：{@code spring-tx} 模块的 {@code support} 包
+ *     （support 包 = 事务抽象的默认实现层）</li>
+ * <li><b>接口层级</b>：实现 {@code Ordered}（控制回调执行顺序）+ {@code Flushable}</li>
+ * </ul>
+ *
+ * <h3>💡 6 个回调方法——事务生命周期的完整钩子</h3>
+ * <table border="1" cellpadding="5" cellspacing="0">
+ * <tr><th>回调方法</th><th>触发时机</th><th>典型场景</th></tr>
+ * <tr><td>{@code suspend()}</td><td>事务被挂起时（REQUIRES_NEW）</td><td>解绑资源</td></tr>
+ * <tr><td>{@code resume()}</td><td>事务被恢复时</td><td>重新绑定资源</td></tr>
+ * <tr><td>{@code flush()}</td><td>事务 flush 时</td><td>Hibernate Session flush</td></tr>
+ * <tr><td>{@code beforeCommit(readOnly)}</td><td>提交前</td><td>数据校验、Session flush</td></tr>
+ * <tr><td>{@code beforeCompletion()}</td><td>提交或回滚前</td><td>关闭资源（Hibernate Session）</td></tr>
+ * <tr><td>{@code afterCommit()}</td><td><b>提交后</b></td><td>👑 最常用！发消息、删缓存、发事件——保证事务已提交再执行</td></tr>
+ * <tr><td>{@code afterCompletion(status)}</td><td>完成后（提交/回滚/未知）</td><td>清理资源、释放连接</td></tr>
+ * </table>
+ *
+ * <h3>🧬 实战中最高频的用法——afterCommit</h3>
+ * <pre>
+ * // 方式一：编程式注册
+ * TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+ *     public void afterCommit() {
+ *         mqTemplate.send("order.created", orderId);  // 事务提交后才发消息
+ *     }
+ * });
+ *
+ * // 方式二：注解式（更优雅）
+ * @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+ * public void onOrderCreated(OrderCreatedEvent event) {
+ *     mqTemplate.send("order.created", event.getOrderId());
+ * }
+ * // 底层也是注册 TransactionSynchronization！
+ * </pre>
+ *
+ * <h3>🧬 3 种完成状态常量</h3>
+ * <ul>
+ * <li>{@code STATUS_COMMITTED = 0}：正常提交</li>
+ * <li>{@code STATUS_ROLLED_BACK = 1}：正常回滚</li>
+ * <li>{@code STATUS_UNKNOWN = 2}：未知（如混合提交/系统错误）</li>
+ * </ul>
+ *
+ * <hr/>
  * Interface for transaction synchronization callbacks.
  * Supported by AbstractPlatformTransactionManager.
  *

@@ -74,6 +74,90 @@ import org.springframework.util.ReflectionUtils;
 import org.springframework.util.StringUtils;
 
 /**
+ * <h1>🗺️ 一、架构坐标·全局定位</h1>
+ * <h2>@Autowired 的"执行双手"——让依赖注入注解真正生效的核心 BPP！</h2>
+ * <ul>
+ * <li><b>全限定名</b>：{@code org.springframework.beans.factory.annotation.AutowiredAnnotationBeanPostProcessor}</li>
+ * <li><b>中文名</b>：自动注入注解 Bean 后置处理器（简称 AABPP）—— @Autowired/@Value/@Inject 的"执行者"</li>
+ * <li><b>所属车间 🏭</b>：{@code spring-beans} 模块的 annotation 包（注意！annotation 包 = Bean 层面的注解支持！
+ * 这个包里聚集了与 Bean 注解相关的核心类：@Autowired/@Value/@Qualifier 注解定义，
+ * 以及本类——让这些注解真正"活"起来的处理器。
+ * 对比：spring-context 的 annotation 包管的是"容器级"注解（@Configuration/@ComponentScan），
+ * 而 spring-beans 的 annotation 包管的是"Bean 级"注解（@Autowired/@Value/@Qualifier）。）</li>
+ * <li><b>身份</b>：实现了 <b>3 个 BPP 子接口</b>——SmartInstantiationAwareBPP + MergedBeanDefinitionPostProcessor + BeanFactoryAware</li>
+ * </ul>
+ *
+ * <h3>💡 为什么它是最重要的 BPP 之一？——没有它，@Autowired 就是一个废标签！</h3>
+ * <p>当你在字段上写 {@code @Autowired private UserService userService;}，
+ * Spring 不是"魔法般"地就把 UserService 注入进来的——是 AABPP 在背后干了三件事：</p>
+ * <ol>
+ * <li><b>扫描阶段</b>（MergedBeanDefinitionPostProcessor.postProcessMergedBeanDefinition）：
+ * 在 BD 合并后、实例化前，扫描类上所有的 @Autowired/@Value/@Inject 注解，
+ * 收集成 {@code InjectionMetadata}（注入元信息缓存），记录"哪个字段/方法需要注入什么"</li>
+ * <li><b>构造器推断</b>（SmartInstantiationAwareBPP.determineCandidateConstructors）：
+ * 如果类有多个构造器，AABPP 帮 Spring 判断"用哪个构造器创建 Bean"——
+ * 优先选 @Autowired 标注的构造器，没有则用默认构造器</li>
+ * <li><b>注入执行</b>（InstantiationAwareBPP.postProcessProperties）：
+ * 在 populateBean 阶段，遍历之前收集的注入点，对每个字段/方法执行反射注入——
+ * 这里会调 {@code beanFactory.resolveDependency()} 从容器中解析真正的依赖</li>
+ * </ol>
+ *
+ * <h3>🧬 AABPP 的三阶段执行时序</h3>
+ * <pre>
+ * doCreateBean(beanName, mbd, args) {
+ *   createBeanInstance()
+ *     └── determineCandidateConstructors()    ← 👈 阶段 1：构造器推断
+ *
+ *   applyMergedBeanDefinitionPostProcessors()
+ *     └── postProcessMergedBeanDefinition()   ← 👈 阶段 2：扫描 @Autowired 注解，缓存注入元信息
+ *
+ *   populateBean()
+ *     └── postProcessProperties()             ← 👈 阶段 3：执行注入（字段反射赋值 / 方法反射调用）
+ * }
+ * </pre>
+ *
+ * <h3>🧬 支持的 4 种注入落点</h3>
+ * <table border="1" cellpadding="5" cellspacing="0">
+ * <tr><th>落点</th><th>示例</th><th>内部表示</th></tr>
+ * <tr><td>字段注入</td><td>{@code @Autowired private UserService userService;}</td><td>AutowiredFieldElement</td></tr>
+ * <tr><td>Setter 注入</td><td>{@code @Autowired public void setUserService(UserService us)}</td><td>AutowiredMethodElement</td></tr>
+ * <tr><td>构造器注入</td><td>{@code @Autowired public OrderService(UserService us)}</td><td>determineCandidateConstructors</td></tr>
+ * <tr><td>@Value 注入</td><td>{@code @Value("${server.port}") private int port;}</td><td>AutowiredFieldElement（同字段注入）</td></tr>
+ * </table>
+ *
+ * <h3>🧬 设计精髓——你的业务能偷师什么？</h3>
+ * <ol>
+ * <li><b>"扫描一次，缓存复用"的两阶段注入</b><br/>
+ * AABPP 不是每次注入时都去扫描注解——它在阶段 2 一次性扫描并缓存成 InjectionMetadata，
+ * 阶段 3 只是从缓存中取出执行。<br/>
+ * <b>业务借鉴</b>：如果你的框架需要扫描注解做处理，先"收集 + 缓存"，后"执行"，避免重复反射。</li>
+ *
+ * <li><b>6 个常见坑（面试高频）</b><br/>
+ * ① static 字段/方法不注入（属于类，不属于实例）<br/>
+ * ② required=true（默认）找不到依赖直接报错<br/>
+ * ③ @Lazy 注入的是代理，真正的 Bean 延迟创建<br/>
+ * ④ 集合注入（List/Map）会注入所有匹配类型的 Bean<br/>
+ * ⑤ Prototype 作用域注入到 Singleton 中只注入一次（需要 ObjectProvider 或 @Scope proxyMode）<br/>
+ * ⑥ 父类的 @Autowired 字段也会被扫描和注入</li>
+ * </ol>
+ *
+ * <h3>🧬 继承体系定位</h3>
+ * <pre>
+ * BeanPostProcessor
+ * └── InstantiationAwareBeanPostProcessor
+ *       └── SmartInstantiationAwareBeanPostProcessor
+ *             └── AutowiredAnnotationBeanPostProcessor  ← 👈 你在这里！
+ *                   + implements MergedBeanDefinitionPostProcessor
+ *                   + implements PriorityOrdered（高优先级，早于大多数 BPP 执行）
+ *                   + implements BeanFactoryAware（获取 BeanFactory 用于依赖解析）
+ * </pre>
+ *
+ * <h3>🎯 三、战略复盘</h3>
+ * <p>AABPP 的核心价值：<b>让 @Autowired/@Value/@Inject 注解真正生效——
+ * 通过"扫描缓存 → 构造器推断 → 反射注入"三阶段，把注解声明转化为实际的依赖注入动作</b>。<br/>
+ * 它是 Spring DI 机制的"最后一公里执行者"——没有它，@Autowired 就只是代码里的装饰品。</p>
+ *
+ * <hr/>
  * {@link org.springframework.beans.factory.config.BeanPostProcessor BeanPostProcessor}
  * implementation that autowires annotated fields, setter methods, and arbitrary
  * config methods. Such members to be injected are detected through annotations:

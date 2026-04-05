@@ -28,6 +28,53 @@ import org.springframework.lang.Nullable;
 import org.springframework.util.Assert;
 
 /**
+ * <h1>🗺️ 一、架构坐标·全局定位</h1>
+ * <h2>AnnotationAwareAspectJAutoProxyCreator —— Spring AOP 的"终极 BPP"，@Aspect 注解的处理引擎！</h2>
+ * <ul>
+ * <li><b>全限定名</b>：{@code org.springframework.aop.aspectj.annotation.AnnotationAwareAspectJAutoProxyCreator}</li>
+ * <li><b>中文名</b>：注解感知的 AspectJ 自动代理创建器 —— 你写 @Aspect/@Before/@Around 最终都是它在处理！</li>
+ * <li><b>所属车间 🏭</b>：{@code spring-aop} 模块的 {@code aspectj.annotation} 包
+ *     （注意！aspectj.annotation 包 = <b>AspectJ 注解风格与 Spring AOP 的桥接层</b>，
+ *     负责把 @Aspect 类解析成 Spring 的 Advisor 体系。与 aspectj 根包的区别：
+ *     根包放 AspectJ 表达式/切点相关，annotation 子包专门处理 @Aspect 注解解析）</li>
+ * <li><b>注册时机</b>：{@code @EnableAspectJAutoProxy} 或 {@code <aop:aspectj-autoproxy/>} 会注册这个 BPP</li>
+ * </ul>
+ *
+ * <h3>💡 这是 AOP 自动代理继承链的"终极形态"</h3>
+ * <pre>
+ * AbstractAutoProxyCreator                （模板骨架：wrapIfNecessary + createProxy）
+ *   └── AbstractAdvisorAutoProxyCreator   （从 BeanFactory 中找所有 Advisor Bean + 匹配过滤）
+ *         └── AspectJAwareAdvisorAutoProxyCreator（排序时考虑 AspectJ 优先级语义）
+ *               └── AnnotationAwareAspectJAutoProxyCreator ← 👈 你在这里！（终极版：解析 @Aspect 注解类）
+ * </pre>
+ *
+ * <h3>🧬 它比父类多做了什么？——@Aspect 类的解析</h3>
+ * <ol>
+ * <li><b>持有 {@code BeanFactoryAspectJAdvisorsBuilder}</b><br/>
+ * 在 {@code findCandidateAdvisors()} 中，除了父类的"从 BeanFactory 中找 Advisor Bean"，
+ * 还额外调用 {@code aspectJAdvisorsBuilder.buildAspectJAdvisors()} 扫描所有 @Aspect 类，
+ * 把其中的 @Before/@After/@Around 等方法<b>解析成 Advisor 对象</b>，合并到候选列表中。</li>
+ *
+ * <li><b>持有 {@code AspectJAdvisorFactory}</b>（默认 {@code ReflectiveAspectJAdvisorFactory}）<br/>
+ * 负责把 @Aspect 类中的每个通知方法 → {@code InstantiationModelAwarePointcutAdvisorImpl}（一个 PointcutAdvisor）。</li>
+ *
+ * <li><b>includePatterns 过滤</b><br/>
+ * 支持通过 {@code <aop:include>} 或代码设置正则表达式，只处理名字匹配的 @Aspect Bean。</li>
+ * </ol>
+ *
+ * <h3>🎯 核心调用链速览</h3>
+ * <pre>
+ * @EnableAspectJAutoProxy
+ *   → 注册 AnnotationAwareAspectJAutoProxyCreator 到容器（internalAutoProxyCreator）
+ *     → Bean 初始化后触发 postProcessAfterInitialization()
+ *       → wrapIfNecessary()
+ *         → findEligibleAdvisors()
+ *           → findCandidateAdvisors()     // 从 BeanFactory 找 Advisor + 解析 @Aspect 类
+ *           → findAdvisorsThatCanApply()   // Pointcut 匹配过滤
+ *         → createProxy()                  // ProxyFactory 创建代理
+ * </pre>
+ *
+ * <hr/>
  * {@link AspectJAwareAdvisorAutoProxyCreator} subclass that processes all AspectJ
  * annotation aspects in the current application context, as well as Spring Advisors.
  *

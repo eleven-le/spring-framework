@@ -31,6 +31,54 @@ import org.springframework.core.BridgeMethodResolver;
 import org.springframework.lang.Nullable;
 
 /**
+ * <h1>🗺️ 一、架构坐标·全局定位</h1>
+ * <h2>ReflectiveMethodInvocation —— AOP 拦截链的"执行引擎"，proceed() 责任链的核心驱动器！</h2>
+ * <ul>
+ * <li><b>全限定名</b>：{@code org.springframework.aop.framework.ReflectiveMethodInvocation}</li>
+ * <li><b>中文名</b>：反射方法调用 —— 持有拦截器链 + 当前游标 index，每次 proceed() 推进一步</li>
+ * <li><b>所属车间 🏭</b>：{@code spring-aop} 模块的 {@code framework} 包
+ *     （framework 包 = AOP 代理创建/执行的核心引擎层）</li>
+ * <li><b>身份</b>：实现 {@code ProxyMethodInvocation}（extends {@code MethodInvocation}），JDK 代理的执行引擎</li>
+ * </ul>
+ *
+ * <h3>💡 proceed() 的"递归弹"机制——责任链模式的精华</h3>
+ * <pre>
+ * 假设拦截链有 3 个拦截器 [A, B, C] + 目标方法 target.foo()：
+ *
+ * proceed()  // index=0 → 调用 A.invoke(this)
+ *   A.invoke(this)
+ *     this.proceed()  // index=1 → 调用 B.invoke(this)
+ *       B.invoke(this)
+ *         this.proceed()  // index=2 → 调用 C.invoke(this)
+ *           C.invoke(this)
+ *             this.proceed()  // index=3 == 链长度 → invokeJoinpoint() 调用目标方法！
+ *               target.foo()  // 真正执行！
+ *             return result   ← C 拿到结果，可以做后处理
+ *           return result     ← B 拿到结果
+ *         return result       ← A 拿到结果
+ * </pre>
+ * <p>关键设计：<b>currentInterceptorIndex</b>（从 -1 开始），每次 proceed() 自增 1。<br/>
+ * 当 index == interceptorsAndDynamicMethodMatchers.size() - 1 时，链走完，调用目标方法。</p>
+ *
+ * <h3>🧬 静态匹配 vs 动态匹配——proceed 中的分支</h3>
+ * <ul>
+ * <li><b>InterceptorAndDynamicMethodMatcher</b>：包装了需要<b>运行时参数匹配</b>的拦截器。
+ *     proceed 时先调 methodMatcher.matches(method, targetClass, args)，匹配才执行，不匹配跳过。</li>
+ * <li><b>MethodInterceptor</b>：普通静态匹配，直接执行 interceptor.invoke(this)。</li>
+ * </ul>
+ *
+ * <h3>🧬 在 AOP 执行流程中的位置</h3>
+ * <pre>
+ * JdkDynamicAopProxy.invoke()
+ *   → new ReflectiveMethodInvocation(proxy, target, method, args, targetClass, chain)
+ *     → invocation.proceed()  // 开始驱动责任链
+ *
+ * CglibAopProxy.DynamicAdvisedInterceptor.intercept()
+ *   → new CglibMethodInvocation(proxy, target, method, args, targetClass, chain, methodProxy)
+ *     → invocation.proceed()  // CglibMethodInvocation extends ReflectiveMethodInvocation
+ * </pre>
+ *
+ * <hr/>
  * Spring's implementation of the AOP Alliance
  * {@link org.aopalliance.intercept.MethodInvocation} interface,
  * implementing the extended

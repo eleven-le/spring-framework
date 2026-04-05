@@ -66,6 +66,40 @@ import org.springframework.util.ObjectUtils;
 import org.springframework.util.StringUtils;
 
 /**
+ * <h1>🗺️ 一、架构坐标·全局定位</h1>
+ * <h2>AspectJExpressionPointcut —— 解析 execution/within/annotation 等 AspectJ 表达式的切点实现！</h2>
+ * <ul>
+ * <li><b>全限定名</b>：{@code org.springframework.aop.aspectj.AspectJExpressionPointcut}</li>
+ * <li><b>中文名</b>：AspectJ 表达式切点 —— 把 {@code execution(* com.example..*.*(..))} 这样的字符串解析为匹配引擎</li>
+ * <li><b>所属车间 🏭</b>：{@code spring-aop} 模块的 {@code aspectj} 包
+ *     （注意！aspectj 包 = <b>AspectJ 切点表达式与 Spring AOP 的桥接层</b>，
+ *     把 AspectJ 的表达式解析能力嫁接到 Spring 的 Pointcut 体系中。
+ *     Spring AOP 本身是<b>代理模式</b>而非字节码织入，但借用了 AspectJ 的表达式语法）</li>
+ * <li><b>身份</b>：同时实现 {@code Pointcut}、{@code ClassFilter}、{@code IntroductionAwareMethodMatcher}——
+ *     一个对象同时扮演切点 + 类过滤器 + 方法匹配器三个角色！</li>
+ * </ul>
+ *
+ * <h3>💡 支持的切点表达式类型</h3>
+ * <ul>
+ * <li>{@code execution(修饰符? 返回类型 类路径.方法名(参数))} —— 最常用！匹配方法执行</li>
+ * <li>{@code within(类路径)} —— 匹配指定类型内的所有方法</li>
+ * <li>{@code @annotation(注解类型)} —— 匹配带有指定注解的方法</li>
+ * <li>{@code @within(注解类型)} —— 匹配带有指定注解的类的所有方法</li>
+ * <li>{@code args(参数类型)} —— 按运行时参数类型匹配（动态匹配！）</li>
+ * <li>{@code this/target} —— 按代理对象/目标对象类型匹配</li>
+ * <li>{@code bean(beanName)} —— Spring 扩展！按 Bean 名称匹配</li>
+ * </ul>
+ *
+ * <h3>🧬 内部核心机制</h3>
+ * <ol>
+ * <li><b>PointcutExpression</b>：由 AspectJ 的 {@code PointcutParser} 解析表达式字符串生成，
+ *     是实际执行匹配的核心对象</li>
+ * <li><b>ShadowMatch 缓存</b>：{@code shadowMatchCache}（ConcurrentHashMap）缓存每个 Method 的匹配结果，
+ *     避免重复解析——这是性能关键，因为匹配在自动代理阶段会被高频调用</li>
+ * <li><b>bean() 扩展</b>：Spring 自定义的 {@code PointcutDesignatorHandler}，让 AspectJ 解析器支持 bean() 语法</li>
+ * </ol>
+ *
+ * <hr/>
  * Spring {@link org.springframework.aop.Pointcut} implementation
  * that uses the AspectJ weaver to evaluate a pointcut expression.
  *

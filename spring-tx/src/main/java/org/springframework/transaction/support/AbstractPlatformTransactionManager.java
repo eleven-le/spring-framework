@@ -37,6 +37,57 @@ import org.springframework.transaction.TransactionSuspensionNotSupportedExceptio
 import org.springframework.transaction.UnexpectedRollbackException;
 
 /**
+ * <h1>🗺️ 一、架构坐标·全局定位</h1>
+ * <h2>AbstractPlatformTransactionManager —— 事务管理器的"模板骨架"，传播行为 + 挂起/恢复 + 同步回调！</h2>
+ * <ul>
+ * <li><b>全限定名</b>：{@code org.springframework.transaction.support.AbstractPlatformTransactionManager}</li>
+ * <li><b>中文名</b>：抽象平台事务管理器 —— 用模板方法模式实现了 7 种传播行为和事务同步回调的完整逻辑</li>
+ * <li><b>所属车间 🏭</b>：{@code spring-tx} 模块的 {@code support} 包
+ *     （注意！support 包 = <b>事务抽象的默认实现层</b>，放模板骨架类、工具类和默认实现。
+ *     与根包 transaction 的区别：根包是纯接口契约，support 是实现骨架）</li>
+ * <li><b>身份</b>：实现 {@code PlatformTransactionManager}，留 6 个模板方法给子类</li>
+ * </ul>
+ *
+ * <h3>💡 6 个模板方法——子类只需实现这些</h3>
+ * <table border="1" cellpadding="5" cellspacing="0">
+ * <tr><th>模板方法</th><th>职责</th><th>抽象/可选</th></tr>
+ * <tr><td>{@code doGetTransaction()}</td><td>获取当前事务对象（如从 ThreadLocal 拿 ConnectionHolder）</td><td><b>抽象</b></td></tr>
+ * <tr><td>{@code isExistingTransaction()}</td><td>判断当前是否已有事务（检查 ConnectionHolder 是否持有活跃连接）</td><td>可选（默认 false）</td></tr>
+ * <tr><td>{@code doBegin()}</td><td>真正开启事务（获取连接、setAutoCommit(false)、绑定到 ThreadLocal）</td><td><b>抽象</b></td></tr>
+ * <tr><td>{@code doSuspend()}</td><td>挂起当前事务（解绑 ThreadLocal 资源）</td><td>可选</td></tr>
+ * <tr><td>{@code doResume()}</td><td>恢复挂起的事务（重新绑定 ThreadLocal 资源）</td><td>可选</td></tr>
+ * <tr><td>{@code doCommit()}</td><td>真正提交（connection.commit()）</td><td><b>抽象</b></td></tr>
+ * <tr><td>{@code doRollback()}</td><td>真正回滚（connection.rollback()）</td><td><b>抽象</b></td></tr>
+ * </table>
+ *
+ * <h3>🧬 getTransaction() 的传播行为决策树——核心中的核心</h3>
+ * <pre>
+ * getTransaction(definition)
+ *   ├── doGetTransaction()  // 获取事务对象
+ *   ├── isExistingTransaction(transaction)?
+ *   │     ├── YES → handleExistingTransaction()  // 已有事务
+ *   │     │         ├── NEVER → 抛异常
+ *   │     │         ├── NOT_SUPPORTED → suspend + 非事务执行
+ *   │     │         ├── REQUIRES_NEW → suspend + doBegin 新事务
+ *   │     │         ├── NESTED → createSavepoint / doBegin(嵌套)
+ *   │     │         └── REQUIRED/SUPPORTS/MANDATORY → 加入已有事务
+ *   │     └── NO → 没有已有事务
+ *   │               ├── MANDATORY → 抛异常（必须有事务！）
+ *   │               ├── REQUIRED/REQUIRES_NEW/NESTED → doBegin 新事务
+ *   │               └── SUPPORTS/NOT_SUPPORTED/NEVER → 非事务执行
+ * </pre>
+ *
+ * <h3>🧬 继承体系定位</h3>
+ * <pre>
+ * PlatformTransactionManager（接口：三板斧）
+ *   └── AbstractPlatformTransactionManager  ← 👈 你在这里！（模板骨架：传播行为 + 同步回调）
+ *         ├── DataSourceTransactionManager  （JDBC 事务——最常用！单 DataSource）
+ *         ├── JpaTransactionManager         （JPA/Hibernate 事务）
+ *         ├── HibernateTransactionManager   （纯 Hibernate 事务）
+ *         └── JtaTransactionManager         （JTA 分布式事务——XA 两阶段提交）
+ * </pre>
+ *
+ * <hr/>
  * Abstract base class that implements Spring's standard transaction workflow,
  * serving as basis for concrete platform transaction managers like
  * {@link org.springframework.transaction.jta.JtaTransactionManager}.

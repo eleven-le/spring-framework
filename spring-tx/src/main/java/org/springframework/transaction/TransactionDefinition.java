@@ -19,6 +19,51 @@ package org.springframework.transaction;
 import org.springframework.lang.Nullable;
 
 /**
+ * <h1>🗺️ 一、架构坐标·全局定位</h1>
+ * <h2>TransactionDefinition —— 事务的"配置清单"：传播行为 + 隔离级别 + 超时 + 只读！</h2>
+ * <ul>
+ * <li><b>全限定名</b>：{@code org.springframework.transaction.TransactionDefinition}</li>
+ * <li><b>中文名</b>：事务定义 —— 描述一个事务"应该长什么样"的配置契约</li>
+ * <li><b>所属车间 🏭</b>：{@code spring-tx} 模块的 {@code transaction} 根包
+ *     （transaction 根包 = 事务抽象的顶层契约层）</li>
+ * <li><b>接口层级</b>：纯数据接口，定义 <b>7 个传播行为常量 + 5 个隔离级别常量 + 4 个 getter 方法</b></li>
+ * </ul>
+ *
+ * <h3>💡 7 种传播行为——面试和实战的重中之重</h3>
+ * <table border="1" cellpadding="5" cellspacing="0">
+ * <tr><th>常量</th><th>语义</th><th>典型场景</th></tr>
+ * <tr><td>REQUIRED (0)</td><td>有就加入，没有就新建</td><td><b>默认值！</b>95% 场景用这个</td></tr>
+ * <tr><td>SUPPORTS (1)</td><td>有就加入，没有就非事务执行</td><td>查询方法，有事务就保持一致性，没有也行</td></tr>
+ * <tr><td>MANDATORY (2)</td><td>必须已有事务，否则抛异常</td><td>内部方法，必须由外层事务包裹</td></tr>
+ * <tr><td>REQUIRES_NEW (3)</td><td>挂起当前事务，新建独立事务</td><td><b>审计日志</b>——即使外层回滚，审计也要保留</td></tr>
+ * <tr><td>NOT_SUPPORTED (4)</td><td>挂起当前事务，非事务执行</td><td>耗时操作不想占事务连接</td></tr>
+ * <tr><td>NEVER (5)</td><td>不允许有事务，否则抛异常</td><td>强制要求非事务上下文</td></tr>
+ * <tr><td>NESTED (6)</td><td>在当前事务中创建保存点嵌套</td><td><b>批量操作</b>——单条失败回滚到保存点，不影响整体</td></tr>
+ * </table>
+ *
+ * <h3>🧬 设计精髓</h3>
+ * <ol>
+ * <li><b>"定义"与"状态"分离</b><br/>
+ * TransactionDefinition = 事务的<b>期望配置</b>（我想要什么样的事务）<br/>
+ * TransactionStatus = 事务的<b>运行时状态</b>（当前事务实际是什么样）<br/>
+ * 这两个接口的分离让"配置"和"执行"解耦——同一个 Definition 可以在不同时刻产生不同的 Status。</li>
+ *
+ * <li><b>隔离级别和超时只在"新事务"时生效</b><br/>
+ * 只有 REQUIRED（新建时）、REQUIRES_NEW、NESTED 会创建新的物理事务。<br/>
+ * 如果加入已有事务，隔离级别和超时设置会被忽略（因为物理连接已存在，属性不能改）。<br/>
+ * 这是很多初学者踩的坑——以为每个 @Transactional 的 isolation 都生效，其实不是。</li>
+ * </ol>
+ *
+ * <h3>🧬 继承体系定位</h3>
+ * <pre>
+ * TransactionDefinition              ← 👈 你在这里！（顶层契约：传播 + 隔离 + 超时 + 只读）
+ * ├── DefaultTransactionDefinition   （默认实现：可设置各属性）
+ * │     └── DefaultTransactionAttribute（加上 rollbackOn + qualifier）
+ * │           └── RuleBasedTransactionAttribute（基于规则的回滚策略——@Transactional 解析产物！）
+ * └── TransactionAttribute           （扩展接口：加 rollbackOn + qualifier + labels）
+ * </pre>
+ *
+ * <hr/>
  * Interface that defines Spring-compliant transaction properties.
  * Based on the propagation behavior definitions analogous to EJB CMT attributes.
  *

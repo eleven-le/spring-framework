@@ -20,6 +20,43 @@ import org.springframework.beans.BeansException;
 import org.springframework.beans.factory.Aware;
 
 /**
+ * <h1>🗺️ 一、架构坐标·全局定位</h1>
+ * <h2>Aware 家族的"全能感知员"——让 Bean 拿到整个 ApplicationContext！</h2>
+ * <ul>
+ * <li><b>全限定名</b>：{@code org.springframework.context.ApplicationContextAware}</li>
+ * <li><b>中文名</b>：应用上下文感知接口 —— Bean 获取容器全能引用的"回调凭证"</li>
+ * <li><b>所属车间 🏭</b>：{@code spring-context} 模块的 context 包（context 包 = 上下文层的用户契约）</li>
+ * <li><b>接口层级</b>：{@code Aware} 的子接口，属于"第二批 Aware"（由 BPP 驱动）</li>
+ * </ul>
+ *
+ * <h3>💡 第二批 Aware 的执行顺序（ApplicationContextAwareProcessor 中）</h3>
+ * <pre>
+ * ApplicationContextAwareProcessor.postProcessBeforeInitialization()
+ * ├── 1. EnvironmentAware.setEnvironment()
+ * ├── 2. EmbeddedValueResolverAware.setEmbeddedValueResolver()
+ * ├── 3. ResourceLoaderAware.setResourceLoader()
+ * ├── 4. ApplicationEventPublisherAware.setApplicationEventPublisher()
+ * ├── 5. MessageSourceAware.setMessageSource()
+ * └── 6. ApplicationContextAware.setApplicationContext()  ← 👈 你在这里！（最后）
+ * </pre>
+ *
+ * <h3>💡 ApplicationContextAware vs 更精确的 Aware</h3>
+ * <table border="1" cellpadding="5" cellspacing="0">
+ * <tr><th>需求</th><th>推荐 Aware</th><th>而非 ApplicationContextAware</th></tr>
+ * <tr><td>读取资源文件</td><td>ResourceLoaderAware</td><td>因为 AC 继承了 ResourceLoader</td></tr>
+ * <tr><td>发布事件</td><td>ApplicationEventPublisherAware</td><td>因为 AC 继承了 EventPublisher</td></tr>
+ * <tr><td>国际化消息</td><td>MessageSourceAware</td><td>因为 AC 继承了 MessageSource</td></tr>
+ * <tr><td>获取环境变量</td><td>EnvironmentAware</td><td>因为 AC 继承了 EnvironmentCapable</td></tr>
+ * <tr><td>需要全部能力</td><td colspan="2">那才用 ApplicationContextAware（ISP 原则：按需取用）</td></tr>
+ * </table>
+ *
+ * <h3>🎯 战略复盘</h3>
+ * <p>ApplicationContextAware 是 Aware 家族中最"强大"的——因为 ApplicationContext 继承了
+ * BeanFactory + ResourceLoader + EventPublisher + MessageSource 等所有能力。
+ * 但正因为太强大，官方建议遵循 ISP（接口隔离原则）：如果只需要发事件，就用
+ * ApplicationEventPublisherAware，而不是直接拿整个 ApplicationContext。</p>
+ *
+ * <hr/>
  * Interface to be implemented by any object that wishes to be notified
  * of the {@link ApplicationContext} that it runs in.
  *

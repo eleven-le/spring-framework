@@ -23,6 +23,38 @@ import org.springframework.lang.Nullable;
 import org.springframework.util.ClassUtils;
 
 /**
+ * <h1>🗺️ 一、架构坐标·全局定位</h1>
+ * <h2>ProxyFactory —— AOP 代理创建的"编程式门面"，三行代码拿到代理对象！</h2>
+ * <ul>
+ * <li><b>全限定名</b>：{@code org.springframework.aop.framework.ProxyFactory}</li>
+ * <li><b>中文名</b>：代理工厂 —— 编程式创建 AOP 代理的<b>一站式入口</b></li>
+ * <li><b>所属车间 🏭</b>：{@code spring-aop} 模块的 {@code framework} 包
+ *     （framework 包 = AOP 代理创建/执行的核心引擎层）</li>
+ * <li><b>类层级</b>：三层继承链的<b>最顶层门面</b></li>
+ * </ul>
+ *
+ * <h3>💡 三层继承链全景</h3>
+ * <pre>
+ * ProxyConfig                 （第 1 层：5 个布尔开关）
+ *   └── AdvisedSupport        （第 2 层：数据仓库——Advisor 列表 + TargetSource + 方法缓存）
+ *         └── ProxyCreatorSupport（第 3 层：工厂桥——持有 AopProxyFactory + createAopProxy()）
+ *               └── ProxyFactory ← 👈 你在这里！（第 4 层：编程式门面——addAdvice/getProxy 一步到位）
+ * </pre>
+ *
+ * <h3>🧬 典型用法（三行代码创建代理）</h3>
+ * <pre>
+ * ProxyFactory factory = new ProxyFactory(target);    // 设置目标对象，自动识别接口
+ * factory.addAdvice(new MyMethodInterceptor());       // 添加拦截器
+ * MyService proxy = (MyService) factory.getProxy();   // 拿到代理对象
+ * </pre>
+ *
+ * <h3>🧬 与 AbstractAutoProxyCreator 的关系——手动 vs 自动</h3>
+ * <p>ProxyFactory 是<b>手动创建</b>代理的入口——你自己组装配置、自己调 getProxy()。<br/>
+ * 而 {@code AbstractAutoProxyCreator}（BPP）是<b>自动创建</b>——它在 Bean 初始化后自动判断是否需要代理，
+ * 内部也是 new ProxyFactory() 来创建！<br/>
+ * 所以 ProxyFactory 既是用户的门面，也是框架内部的底层工具。</p>
+ *
+ * <hr/>
  * Factory for AOP proxies for programmatic use, rather than via declarative
  * setup in a bean factory. This class provides a simple way of obtaining
  * and configuring AOP proxy instances in custom user code.

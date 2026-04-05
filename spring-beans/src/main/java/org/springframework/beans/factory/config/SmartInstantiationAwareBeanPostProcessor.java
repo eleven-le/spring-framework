@@ -22,6 +22,37 @@ import org.springframework.beans.BeansException;
 import org.springframework.lang.Nullable;
 
 /**
+ * <h1>🗺️ 一、架构坐标·全局定位</h1>
+ * <h2>BPP 家族的"顶级特工"——构造器推断 + 早期引用 + 类型预测，三大内部能力！</h2>
+ * <ul>
+ * <li><b>全限定名</b>：{@code org.springframework.beans.factory.config.SmartInstantiationAwareBeanPostProcessor}</li>
+ * <li><b>中文名</b>：智能实例化感知 Bean 后置处理器 —— BPP 体系的"最高级别特种兵"</li>
+ * <li><b>所属车间 🏭</b>：{@code spring-beans} 模块的 config 包（config 包 = 框架内部配置契约）</li>
+ * <li><b>接口层级</b>：{@code InstantiationAwareBeanPostProcessor} 的子接口，新增 <b>3 个方法</b></li>
+ * </ul>
+ *
+ * <h3>🧬 3 个新增方法——纯框架内部使用</h3>
+ * <table border="1" cellpadding="5" cellspacing="0">
+ * <tr><th>方法</th><th>时机</th><th>典型使用者</th></tr>
+ * <tr><td><b>predictBeanType</b></td><td>类型预测（按类型查找时）</td><td>AbstractAutoProxyCreator（预测代理后类型）</td></tr>
+ * <tr><td><b>determineCandidateConstructors</b></td><td>实例化时推断构造器</td><td><b>AABPP</b>（选 @Autowired 构造器）</td></tr>
+ * <tr><td><b>getEarlyBeanReference</b></td><td>三级缓存曝光时</td><td>AbstractAutoProxyCreator（返回 AOP 代理早期引用，解决循环依赖）</td></tr>
+ * </table>
+ *
+ * <h3>🧬 BPP 完整继承链</h3>
+ * <pre>
+ * BeanPostProcessor                           （初始化前后）
+ * └── InstantiationAwareBeanPostProcessor     （实例化前后 + 属性注入）
+ *       └── SmartInstantiationAwareBeanPostProcessor  ← 👈 你在这里！（构造器推断 + 早期引用 + 类型预测）
+ *             ├── AutowiredAnnotationBeanPostProcessor （构造器推断 + @Autowired 注入）
+ *             └── AbstractAutoProxyCreator            （AOP 代理创建 + 早期引用）
+ * </pre>
+ *
+ * <h3>🎯 战略复盘</h3>
+ * <p>SmartInstantiationAwareBPP 是 BPP 体系的"顶配"——构造器推断、循环依赖解决（三级缓存早期引用）、
+ * 类型预测三大内部能力。纯框架内部使用，应用代码不应实现此接口。</p>
+ *
+ * <hr/>
  * Extension of the {@link InstantiationAwareBeanPostProcessor} interface,
  * adding a callback for predicting the eventual type of a processed bean.
  *

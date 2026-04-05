@@ -75,6 +75,51 @@ import org.springframework.util.StringUtils;
 import org.springframework.util.StringValueResolver;
 
 /**
+ * <h1>🗺️ 一、架构坐标·全局定位</h1>
+ * <h2>JSR-250 注解的"执行者"——@PostConstruct/@PreDestroy/@Resource 全靠它！</h2>
+ * <ul>
+ * <li><b>全限定名</b>：{@code org.springframework.context.annotation.CommonAnnotationBeanPostProcessor}</li>
+ * <li><b>中文名</b>：通用注解 Bean 后置处理器 —— JSR-250 三板斧的"落地引擎"</li>
+ * <li><b>所属车间 🏭</b>：{@code spring-context} 模块的 annotation 包（annotation 包 = 注解驱动编程模型的大本营）</li>
+ * <li><b>类层级</b>：{@code InitDestroyAnnotationBeanPostProcessor} 的子类 +
+ *     实现 {@code InstantiationAwareBeanPostProcessor} + {@code BeanFactoryAware}</li>
+ * </ul>
+ *
+ * <h3>💡 三大职责——对应三个 JSR-250 注解</h3>
+ * <table border="1" cellpadding="5" cellspacing="0">
+ * <tr><th>注解</th><th>职责</th><th>执行时机</th><th>实现机制</th></tr>
+ * <tr><td><b>@PostConstruct</b></td><td>初始化回调</td><td>BPP.postProcessBeforeInitialization</td>
+ *     <td>继承自父类 InitDestroyAnnotationBeanPostProcessor</td></tr>
+ * <tr><td><b>@PreDestroy</b></td><td>销毁回调</td><td>DestructionAwareBPP.postProcessBeforeDestruction</td>
+ *     <td>继承自父类 InitDestroyAnnotationBeanPostProcessor</td></tr>
+ * <tr><td><b>@Resource</b></td><td>按名称注入</td><td>InstantiationAwareBPP.postProcessProperties</td>
+ *     <td>本类自己实现（ResourceElement 注入元素）</td></tr>
+ * </table>
+ *
+ * <h3>🧬 继承体系——多接口组合的"全能选手"</h3>
+ * <pre>
+ * InitDestroyAnnotationBeanPostProcessor          （父类：@PostConstruct/@PreDestroy）
+ * └── CommonAnnotationBeanPostProcessor            ← 👈 你在这里！
+ *     ├── implements InstantiationAwareBPP         （@Resource 注入）
+ *     ├── implements BeanFactoryAware              （获取工厂做 Bean 解析）
+ *     └── implements DestructionAwareBPP（继承自父类）（@PreDestroy 销毁回调）
+ * </pre>
+ *
+ * <h3>💡 与 AutowiredAnnotationBPP 的分工</h3>
+ * <table border="1" cellpadding="5" cellspacing="0">
+ * <tr><th>对比</th><th>CommonAnnotationBPP（本类）</th><th>AutowiredAnnotationBPP</th></tr>
+ * <tr><td>管辖注解</td><td>@PostConstruct / @PreDestroy / @Resource</td><td>@Autowired / @Value / @Inject</td></tr>
+ * <tr><td>注入策略</td><td>@Resource 按名称优先</td><td>@Autowired 按类型优先</td></tr>
+ * <tr><td>标准</td><td>JSR-250（Java EE 通用）</td><td>Spring 原生 + JSR-330</td></tr>
+ * <tr><td>注册 Bean 名</td><td>internalCommonAnnotationProcessor</td><td>internalAutowiredAnnotationProcessor</td></tr>
+ * </table>
+ *
+ * <h3>🎯 战略复盘</h3>
+ * <p>CommonAnnotationBPP 是 AnnotationConfigUtils 注册的 6 大内置处理器之一，
+ * 负责 JSR-250 标准注解的落地执行。它通过继承 InitDestroyAnnotationBeanPostProcessor
+ * 获得生命周期回调能力，再自己实现 @Resource 注入能力——一个类搞定 JSR-250 三板斧。</p>
+ *
+ * <hr/>
  * {@link org.springframework.beans.factory.config.BeanPostProcessor} implementation
  * that supports common Java annotations out of the box, in particular the JSR-250
  * annotations in the {@code javax.annotation} package. These common Java

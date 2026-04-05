@@ -54,6 +54,57 @@ import org.springframework.util.ClassUtils;
 import org.springframework.util.StringUtils;
 
 /**
+ * <h1>🗺️ 一、架构坐标·全局定位</h1>
+ * <h2>AbstractAutoProxyCreator —— Spring AOP 自动代理的"总指挥"，BPP 中的 AOP 入口！</h2>
+ * <ul>
+ * <li><b>全限定名</b>：{@code org.springframework.aop.framework.autoproxy.AbstractAutoProxyCreator}</li>
+ * <li><b>中文名</b>：抽象自动代理创建器 —— 在 Bean 初始化后自动判断是否需要 AOP 代理，需要就包一层</li>
+ * <li><b>所属车间 🏭</b>：{@code spring-aop} 模块的 {@code framework.autoproxy} 包
+ *     （注意！autoproxy 包 = <b>自动代理基础设施</b>，负责"在 Bean 生命周期中自动织入 AOP"！
+ *     与 framework 包的区别：framework 放的是代理创建引擎，autoproxy 放的是"什么时候触发创建"的策略）</li>
+ * <li><b>身份</b>：{@code SmartInstantiationAwareBeanPostProcessor}——最强的 BPP，能介入实例化前后 + 初始化前后</li>
+ * </ul>
+ *
+ * <h3>💡 核心职责——在 Bean 生命周期的哪个节点创建代理？</h3>
+ * <p>AbstractAutoProxyCreator 通过 BPP 回调介入 Bean 的生命周期：</p>
+ * <pre>
+ * Bean 生命周期 × AOP 代理创建时机：
+ *
+ * postProcessBeforeInstantiation()   ← 实例化前（极少走：只有自定义 TargetSource 时才短路）
+ *   │  如果返回非 null → 直接用这个对象，跳过后续所有步骤
+ *   │  通常返回 null → 继续正常流程
+ *   ↓
+ * [正常实例化 + 属性注入 + 初始化]
+ *   ↓
+ * postProcessAfterInitialization()   ← 👈 主战场！99% 的 AOP 代理在这里创建！
+ *   │  wrapIfNecessary(bean, beanName, cacheKey)
+ *   │    ├── getAdvicesAndAdvisorsForBean()  // 模板方法：子类决定哪些 Advisor 适用于这个 Bean
+ *   │    ├── 如果有适用的 Advisor → createProxy()  // 用 ProxyFactory 创建代理
+ *   │    └── 如果没有 → 返回原始 bean
+ *   ↓
+ * getEarlyBeanReference()            ← 循环依赖救援（三级缓存 ObjectFactory 回调）
+ *   │  如果这个 Bean 卷入循环依赖，提前暴露代理对象
+ * </pre>
+ *
+ * <h3>🧬 继承体系定位</h3>
+ * <pre>
+ * SmartInstantiationAwareBeanPostProcessor (BPP 接口)
+ *   └── AbstractAutoProxyCreator          ← 👈 你在这里！（模板骨架：wrapIfNecessary + createProxy）
+ *         ├── BeanNameAutoProxyCreator    （按 Bean 名称匹配——简单粗暴）
+ *         └── AbstractAdvisorAutoProxyCreator（按 Advisor 匹配——智能精确）
+ *               ├── DefaultAdvisorAutoProxyCreator（扫描所有 Advisor Bean 自动代理）
+ *               └── AspectJAwareAdvisorAutoProxyCreator（感知 AspectJ 语义的排序）
+ *                     └── AnnotationAwareAspectJAutoProxyCreator（👑 终极版！处理 @Aspect 注解）
+ * </pre>
+ *
+ * <h3>🧬 设计精髓</h3>
+ * <ol>
+ * <li><b>模板方法模式</b>：{@code wrapIfNecessary()} 定义骨架，{@code getAdvicesAndAdvisorsForBean()} 留给子类实现</li>
+ * <li><b>earlyProxyReferences 缓存</b>：防止循环依赖场景下重复代理（getEarlyBeanReference 和 postProcessAfterInitialization 只会执行一次代理）</li>
+ * <li><b>proxyTypes 缓存</b>：缓存每个 Bean 的代理类型，供 predictBeanType() 使用（解决 BeanFactory.getBeansOfType 的类型预测）</li>
+ * </ol>
+ *
+ * <hr/>
  * {@link org.springframework.beans.factory.config.BeanPostProcessor} implementation
  * that wraps each eligible bean with an AOP proxy, delegating to specified interceptors
  * before invoking the bean itself.

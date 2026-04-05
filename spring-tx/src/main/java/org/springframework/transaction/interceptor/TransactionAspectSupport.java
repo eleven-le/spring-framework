@@ -56,6 +56,42 @@ import org.springframework.util.ConcurrentReferenceHashMap;
 import org.springframework.util.StringUtils;
 
 /**
+ * <h1>🗺️ 一、架构坐标·全局定位</h1>
+ * <h2>TransactionAspectSupport —— 声明式事务的"真正大脑"，invokeWithinTransaction() 的家！</h2>
+ * <ul>
+ * <li><b>全限定名</b>：{@code org.springframework.transaction.interceptor.TransactionAspectSupport}</li>
+ * <li><b>中文名</b>：事务切面支撑基类 —— 封装完整的事务执行逻辑：开启 → 执行 → 提交/回滚</li>
+ * <li><b>所属车间 🏭</b>：{@code spring-tx} 模块的 {@code interceptor} 包
+ *     （interceptor 包 = 事务 AOP 拦截层）</li>
+ * <li><b>身份</b>：抽象基类，持有 TransactionManager + TransactionAttributeSource + TransactionInfo ThreadLocal 栈</li>
+ * </ul>
+ *
+ * <h3>💡 invokeWithinTransaction() —— Spring 声明式事务的"心脏方法"</h3>
+ * <pre>
+ * invokeWithinTransaction(method, targetClass, invocationCallback)
+ *   ├── 1. txAttr = tas.getTransactionAttribute(method, targetClass)   // 查事务属性（缓存）
+ *   ├── 2. tm = determineTransactionManager(txAttr)                    // 路由到正确的 TM
+ *   │       └── 4 级回退：qualifier → beanName → 默认TM → BeanFactory.getBean(TM.class)
+ *   ├── 3. txInfo = createTransactionIfNecessary(tm, txAttr, joinpointId)
+ *   │       ├── tm.getTransaction(txAttr)  // 传播行为决策！
+ *   │       └── 绑定 TransactionInfo 到 ThreadLocal 栈（支持嵌套事务）
+ *   ├── 4. retVal = invocation.proceedWithInvocation()  // 执行目标方法
+ *   ├── 5a. 异常 → completeTransactionAfterThrowing(txInfo, ex)
+ *   │       └── txAttr.rollbackOn(ex) ? rollback : commit
+ *   ├── 5b. 正常 → commitTransactionAfterReturning(txInfo)
+ *   └── finally → cleanupTransactionInfo(txInfo)  // 恢复 ThreadLocal 栈
+ * </pre>
+ *
+ * <h3>🧬 TransactionInfo —— ThreadLocal 栈的"栈帧"</h3>
+ * <p>每进入一个 @Transactional 方法，就 push 一个 TransactionInfo（持有 TM + txAttr + status + oldTxInfo）。<br/>
+ * 方法结束时 pop 恢复上层的 TransactionInfo。这就是<b>嵌套事务</b>能正常工作的原因：<br/>
+ * 每一层都知道自己的事务状态，且能恢复外层状态。</p>
+ *
+ * <h3>🧬 currentTransactionStatus() —— 业务代码获取当前事务状态的入口</h3>
+ * <p>{@code TransactionAspectSupport.currentTransactionStatus()} 从 ThreadLocal 栈顶取出当前事务状态。<br/>
+ * 业务代码可以用它来手动 {@code setRollbackOnly()}，而不需要抛异常。</p>
+ *
+ * <hr/>
  * Base class for transactional aspects, such as the {@link TransactionInterceptor}
  * or an AspectJ aspect.
  *

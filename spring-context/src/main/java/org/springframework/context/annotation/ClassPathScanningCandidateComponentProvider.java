@@ -62,6 +62,50 @@ import org.springframework.util.Assert;
 import org.springframework.util.ClassUtils;
 
 /**
+ * <h1>🗺️ 一、架构坐标·全局定位</h1>
+ * <h2>包扫描的"底层引擎"——ASM 读取 .class 文件，过滤出候选组件！</h2>
+ * <ul>
+ * <li><b>全限定名</b>：{@code org.springframework.context.annotation.ClassPathScanningCandidateComponentProvider}</li>
+ * <li><b>中文名</b>：类路径候选组件扫描提供者 —— Scanner 的"扫描引擎"</li>
+ * <li><b>所属车间 🏭</b>：{@code spring-context} 模块的 annotation 包（annotation 包 = 注解驱动编程模型的大本营）</li>
+ * <li><b>类层级</b>：ClassPathBeanDefinitionScanner 的父类，提供扫描核心算法</li>
+ * </ul>
+ *
+ * <h3>💡 父子分工——扫描引擎 vs 注册协调</h3>
+ * <table border="1" cellpadding="5" cellspacing="0">
+ * <tr><th>对比</th><th>ClassPathScanningCandidateComponentProvider（本类）</th><th>ClassPathBeanDefinitionScanner（子类）</th></tr>
+ * <tr><td>职责</td><td>扫描 .class → 过滤 → 返回候选 BD 集合</td><td>候选 BD → 补全属性 → 注册到 Registry</td></tr>
+ * <tr><td>核心方法</td><td>findCandidateComponents(basePackage)</td><td>doScan(basePackages)</td></tr>
+ * <tr><td>技术手段</td><td>ASM MetadataReader + TypeFilter 过滤链</td><td>ScopeMetadataResolver + BeanNameGenerator + Registry</td></tr>
+ * <tr><td>可独立使用</td><td>可以（纯扫描不注册）</td><td>扫描 + 注册一体</td></tr>
+ * </table>
+ *
+ * <h3>🧬 扫描核心流程</h3>
+ * <pre>
+ * findCandidateComponents(basePackage)
+ * │
+ * ├── 方式1：componentsIndex 存在？→ addCandidateComponentsFromIndex()  ← Spring 5 索引加速
+ * │
+ * └── 方式2：scanCandidateComponents(basePackage)  ← 经典 ASM 扫描
+ *     ├── 1. resourcePattern = "**&#47;*.class"
+ *     ├── 2. PathMatchingResourcePatternResolver 扫描所有 .class Resource
+ *     ├── 3. MetadataReaderFactory 用 ASM 读取每个 .class（不加载类！）
+ *     ├── 4. isCandidateComponent(metadataReader)  ← excludeFilters / includeFilters 过滤
+ *     │     └── 默认 includeFilter: @Component（含 @Service/@Repository/@Controller）
+ *     └── 5. 通过 → new ScannedGenericBeanDefinition(metadataReader)
+ * </pre>
+ *
+ * <h3>💡 关键设计——ASM 不加载类</h3>
+ * <p>扫描阶段使用 ASM 直接读取 .class 字节码获取注解元信息，
+ * <b>不触发类加载</b>（不会执行 static 块、不会加载依赖类）。
+ * 这是 Spring 扫描大量类时保持高性能的关键——只有最终被注册的 Bean 才会在 getBean 时加载类。</p>
+ *
+ * <h3>🎯 战略复盘</h3>
+ * <p>ClassPathScanningCandidateComponentProvider 是 @ComponentScan 背后的扫描引擎——
+ * 用 ASM 高效扫描类路径，通过 TypeFilter 链过滤候选组件。子类 ClassPathBeanDefinitionScanner
+ * 在此基础上增加了 BD 属性补全和注册逻辑。两者是"模板方法"模式的经典案例。</p>
+ *
+ * <hr/>
  * A component provider that scans for candidate components starting from a
  * specified base package. Can use the {@linkplain CandidateComponentsIndex component
  * index}, if it is available, and scans the classpath otherwise.

@@ -36,6 +36,41 @@ import org.springframework.util.Assert;
 import org.springframework.util.ClassUtils;
 
 /**
+ * <h1>🗺️ 一、架构坐标·全局定位</h1>
+ * <h2>JdkDynamicAopProxy —— 基于 JDK 动态代理的 AOP 代理实现，同时充当 InvocationHandler！</h2>
+ * <ul>
+ * <li><b>全限定名</b>：{@code org.springframework.aop.framework.JdkDynamicAopProxy}</li>
+ * <li><b>中文名</b>：JDK 动态 AOP 代理 —— 用 {@code java.lang.reflect.Proxy} 生成代理对象</li>
+ * <li><b>所属车间 🏭</b>：{@code spring-aop} 模块的 {@code framework} 包
+ *     （framework 包 = AOP 代理创建/执行的核心引擎层）</li>
+ * <li><b>身份</b>：实现 {@link AopProxy}（策略接口）+ {@code InvocationHandler}（JDK 代理回调）</li>
+ * </ul>
+ *
+ * <h3>💡 JDK 动态代理的工作原理</h3>
+ * <p>{@code Proxy.newProxyInstance(classLoader, interfaces, this)} —— 生成的代理类（$Proxy0）
+ * 实现了目标的所有接口，所有方法调用都会转发到 {@code this.invoke(proxy, method, args)}。<br/>
+ * 所以 JdkDynamicAopProxy 自己既是<b>工厂</b>（getProxy 创建代理）又是<b>执行引擎</b>（invoke 处理调用）！</p>
+ *
+ * <h3>🧬 invoke() 核心流程——拦截链的执行引擎</h3>
+ * <pre>
+ * invoke(proxy, method, args)
+ *   ├── 1. equals/hashCode/toString 等特殊方法 → 直接处理，不走拦截链
+ *   ├── 2. Advised 接口方法 → 转发给 AdvisedSupport 配置对象
+ *   ├── 3. 获取目标对象：targetSource.getTarget()
+ *   ├── 4. 获取拦截链：advised.getInterceptorsAndDynamicInterceptionAdvice(method, targetClass)
+ *   ├── 5a. 拦截链为空 → 直接反射调用目标方法（AopUtils.invokeJoinpointUsingReflection）
+ *   └── 5b. 拦截链不为空 → new ReflectiveMethodInvocation(...).proceed()  // 责任链执行！
+ * </pre>
+ *
+ * <h3>🧬 JDK vs CGLIB 的选择时机</h3>
+ * <p>{@link DefaultAopProxyFactory} 的选择逻辑：</p>
+ * <ul>
+ * <li><b>用 JDK</b>：目标实现了接口 且 没有设置 proxyTargetClass=true</li>
+ * <li><b>用 CGLIB</b>：目标没有接口 或 显式设置了 proxyTargetClass=true</li>
+ * </ul>
+ * <p>JDK 代理的限制：<b>只能代理接口方法</b>。如果你调用的是类上定义的方法（而非接口声明的），JDK 代理拦截不到。</p>
+ *
+ * <hr/>
  * JDK-based {@link AopProxy} implementation for the Spring AOP framework,
  * based on JDK {@link java.lang.reflect.Proxy dynamic proxies}.
  *

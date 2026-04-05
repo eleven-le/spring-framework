@@ -43,6 +43,44 @@ import org.springframework.util.ClassUtils;
 import org.springframework.util.CollectionUtils;
 
 /**
+ * <h1>🗺️ 一、架构坐标·全局定位</h1>
+ * <h2>AdvisedSupport —— AOP 代理的"配置数据仓库"，Advisor 列表 + TargetSource + 代理接口全在这！</h2>
+ * <ul>
+ * <li><b>全限定名</b>：{@code org.springframework.aop.framework.AdvisedSupport}</li>
+ * <li><b>中文名</b>：AOP 代理配置支撑类 —— 代理创建前的"弹药库 + 目标档案"</li>
+ * <li><b>所属车间 🏭</b>：{@code spring-aop} 模块的 {@code framework} 包
+ *     （framework 包 = AOP 代理创建/执行的<b>核心引擎层</b>）</li>
+ * <li><b>类层级</b>：{@code ProxyConfig → AdvisedSupport}，实现 {@code Advised} 接口</li>
+ * </ul>
+ *
+ * <h3>💡 为什么把"配置持有"独立成一层？——三层继承链的"数据-工厂-门面"分工</h3>
+ * <pre>
+ * ProxyConfig           （第 1 层：5 个开关——proxyTargetClass/optimize/frozen/exposeProxy/opaque）
+ *   └── AdvisedSupport  （第 2 层：数据仓库——Advisor列表 + TargetSource + 接口列表 + 方法缓存）← 👈 你在这里！
+ *         └── ProxyCreatorSupport（第 3 层：工厂桥——持有 AopProxyFactory，createAopProxy()）
+ *               ├── ProxyFactory         （编程式门面——addAdvice/addAdvisor/getProxy 一步到位）
+ *               └── ProxyFactoryBean     （XML 声明式——通过 FactoryBean 集成到容器）
+ * </pre>
+ * <p>AdvisedSupport 负责<b>管理所有与代理相关的配置数据</b>：</p>
+ * <ul>
+ * <li><b>advisors 列表</b>：有序的 Advisor 数组，决定拦截链的内容和顺序</li>
+ * <li><b>targetSource</b>：目标对象的来源（支持单例、池化、热替换等策略）</li>
+ * <li><b>interfaces</b>：代理需要实现的接口列表</li>
+ * <li><b>methodCache</b>：方法 → 拦截器链的缓存（{@code ConcurrentHashMap}，性能关键！）</li>
+ * </ul>
+ *
+ * <h3>🧬 设计精髓</h3>
+ * <ol>
+ * <li><b>advisorChainFactory.getInterceptorsAndDynamicInterceptionAdvice()</b><br/>
+ * 这是性能热点方法——把 Advisor 列表转换为 MethodInterceptor[] 拦截链。<br/>
+ * 转换结果按 Method 缓存在 methodCache 中，同一个方法第二次调用直接命中缓存。</li>
+ *
+ * <li><b>adviceChanged() 通知机制</b><br/>
+ * 当 Advisor 列表发生变化时（add/remove），会清空 methodCache 并通知 listener。<br/>
+ * 这确保了代理在运行时可以动态修改拦截链（虽然 frozen=true 时会禁止修改以优化性能）。</li>
+ * </ol>
+ *
+ * <hr/>
  * Base class for AOP proxy configuration managers.
  *
  * <p>These are not themselves AOP proxies, but subclasses of this class are

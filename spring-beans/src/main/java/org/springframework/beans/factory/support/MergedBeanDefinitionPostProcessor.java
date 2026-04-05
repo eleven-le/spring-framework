@@ -19,6 +19,34 @@ package org.springframework.beans.factory.support;
 import org.springframework.beans.factory.config.BeanPostProcessor;
 
 /**
+ * <h1>🗺️ 一、架构坐标·全局定位</h1>
+ * <h2>BD 合并后的"元信息收集员"——在实例化后抢先扫描注解、缓存注入点！</h2>
+ * <ul>
+ * <li><b>全限定名</b>：{@code org.springframework.beans.factory.support.MergedBeanDefinitionPostProcessor}</li>
+ * <li><b>中文名</b>：合并 Bean 定义后置处理器 —— BD 合并后的"预扫描员"</li>
+ * <li><b>所属车间 🏭</b>：{@code spring-beans} 模块的 support 包（support 包 = 骨架实现区。
+ * 本接口在 support 包而非 config 包，因为它操作的是 {@link RootBeanDefinition}——合并后的终态图纸，
+ * 属于实现层概念）</li>
+ * <li><b>接口层级</b>：{@code BeanPostProcessor} 的子接口，新增 <b>1 个方法</b> + 1 个默认方法</li>
+ * </ul>
+ *
+ * <h3>🧬 执行时机（在 doCreateBean 中）</h3>
+ * <pre>
+ * doCreateBean() {
+ *   createBeanInstance()                         ← 实例化完成
+ *   ★ applyMergedBeanDefinitionPostProcessors()  ← 👈 本接口在此执行！
+ *   │   ├── AABPP.postProcessMergedBeanDefinition()  → 缓存 @Autowired/@Value 注入点
+ *   │   └── CABPP.postProcessMergedBeanDefinition()  → 缓存 @Resource/@PostConstruct/@PreDestroy
+ *   addSingletonFactory()                        ← 三级缓存曝光
+ *   populateBean()                               ← 使用上面缓存的注入点执行注入
+ * }
+ * </pre>
+ *
+ * <h3>🎯 战略复盘</h3>
+ * <p>MergedBeanDefinitionPostProcessor 在 BD 合并后、属性注入前提供"预扫描"窗口，
+ * AABPP 和 CommonAnnotationBPP 都通过此接口实现"扫描一次，缓存复用"的高效注入模式。</p>
+ *
+ * <hr/>
  * Post-processor callback interface for <i>merged</i> bean definitions at runtime.
  * {@link BeanPostProcessor} implementations may implement this sub-interface in order
  * to post-process the merged bean definition (a processed copy of the original bean

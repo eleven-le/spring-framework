@@ -21,6 +21,38 @@ import org.springframework.lang.Nullable;
 import org.springframework.util.ObjectUtils;
 
 /**
+ * <h1>🗺️ 一、架构坐标·全局定位</h1>
+ * <h2>"通用图纸"——XML/注解解析后的原始 BD，可指定 parent 继承公共属性！</h2>
+ * <ul>
+ * <li><b>全限定名</b>：{@code org.springframework.beans.factory.support.GenericBeanDefinition}</li>
+ * <li><b>中文名</b>：通用 Bean 定义 —— 解析阶段产出的"原始图纸"</li>
+ * <li><b>所属车间 🏭</b>：{@code spring-beans} 模块的 support 包（support 包 = 骨架实现区）</li>
+ * <li><b>类层级</b>：{@code AbstractBeanDefinition} 的子类，Spring 2.5 引入，替代了旧的 ChildBeanDefinition</li>
+ * </ul>
+ *
+ * <h3>💡 GenericBD vs RootBD——"原始图纸" vs "终态图纸"</h3>
+ * <table border="1" cellpadding="5" cellspacing="0">
+ * <tr><th>对比</th><th>GenericBeanDefinition</th><th>RootBeanDefinition</th></tr>
+ * <tr><td>角色</td><td>解析阶段的原始产物</td><td>合并后的终态图纸</td></tr>
+ * <tr><td>parentName</td><td>可以有（支持 BD 继承）</td><td>没有（已合并完毕）</td></tr>
+ * <tr><td>运行时缓存</td><td>没有</td><td>有（已解析构造器、BPP 短路标记等）</td></tr>
+ * <tr><td>使用者</td><td>BFPP 可修改/重配 parent</td><td>createBean 直接使用</td></tr>
+ * </table>
+ *
+ * <h3>🧬 图纸家族中的位置</h3>
+ * <pre>
+ * AbstractBeanDefinition
+ * ├── GenericBeanDefinition        ← 👈 你在这里！（通用原始图纸，可有 parentName）
+ * │     ├── AnnotatedGenericBeanDefinition  （Reader 注册时产出，携带注解元信息）
+ * │     └── ScannedGenericBeanDefinition    （Scanner 扫描时产出，携带 ASM 元信息）
+ * └── RootBeanDefinition           （终态图纸，合并后产出）
+ * </pre>
+ *
+ * <h3>🎯 战略复盘</h3>
+ * <p>GenericBeanDefinition 是 XML/注解解析阶段的标准产物——它支持 parentName 继承，
+ * 让 BFPP 有机会在合并前修改。Spring 2.5 后推荐用 GenericBD 替代旧的 ChildBD + RootBD 组合。</p>
+ *
+ * <hr/>
  * GenericBeanDefinition is a one-stop shop for standard bean definition purposes.
  * Like any bean definition, it allows for specifying a class plus optionally
  * constructor argument values and property values. Additionally, deriving from a

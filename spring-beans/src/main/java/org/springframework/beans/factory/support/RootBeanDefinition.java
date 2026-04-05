@@ -35,6 +35,45 @@ import org.springframework.lang.Nullable;
 import org.springframework.util.Assert;
 
 /**
+ * <h1>🗺️ 一、架构坐标·全局定位</h1>
+ * <h2>"终态图纸"——合并后的最终版 BD，createBean 直接使用的运行时图纸！</h2>
+ * <ul>
+ * <li><b>全限定名</b>：{@code org.springframework.beans.factory.support.RootBeanDefinition}</li>
+ * <li><b>中文名</b>：根 Bean 定义 —— 合并后的"终态施工图"</li>
+ * <li><b>所属车间 🏭</b>：{@code spring-beans} 模块的 support 包（support 包 = 骨架实现区）</li>
+ * <li><b>类层级</b>：{@code AbstractBeanDefinition} 的子类</li>
+ * </ul>
+ *
+ * <h3>💡 为什么需要"合并"成 RootBeanDefinition？</h3>
+ * <p>GenericBeanDefinition 可以有 parentName（继承另一个 BD 的公共属性）。
+ * 但 createBean 需要一个<b>完整的、自包含的</b>图纸——不能还有"去父图纸查"的间接引用。<br/>
+ * 所以 Spring 在创建 Bean 前，会把 child BD + parent BD <b>合并</b>成一个 RootBeanDefinition，
+ * 这就是 {@code AbstractBeanFactory.getMergedLocalBeanDefinition()} 的作用。</p>
+ *
+ * <h3>🧬 RootBD 独有的"运行时缓存"字段（GenericBD 没有的）</h3>
+ * <table border="1" cellpadding="5" cellspacing="0">
+ * <tr><th>字段</th><th>用途</th></tr>
+ * <tr><td>resolvedConstructorOrFactoryMethod</td><td>缓存已解析的构造器/工厂方法（避免重复推断）</td></tr>
+ * <tr><td>constructorArgumentsResolved</td><td>标记构造器参数是否已解析</td></tr>
+ * <tr><td>beforeInstantiationResolved</td><td>标记 BPP 短路是否已尝试</td></tr>
+ * <tr><td>externallyManagedInitMethods</td><td>外部管理的初始化方法集合</td></tr>
+ * <tr><td>externallyManagedDestroyMethods</td><td>外部管理的销毁方法集合</td></tr>
+ * </table>
+ * <p>这些缓存字段是<b>运行时优化</b>——只在 createBean 过程中填充，GenericBD 不需要也不应该有。</p>
+ *
+ * <h3>🧬 图纸的生命周期</h3>
+ * <pre>
+ * ① 解析阶段：XML/注解解析 → GenericBeanDefinition（原始图纸，可有 parent）
+ * ② 合并阶段：getMergedLocalBeanDefinition() → RootBeanDefinition（终态图纸）  ← 👈 你在这里！
+ * ③ 施工阶段：createBean(beanName, mbd, args) → 使用 RootBD 创建 Bean
+ * </pre>
+ *
+ * <h3>🎯 战略复盘</h3>
+ * <p>RootBeanDefinition 是 createBean 直接使用的"终态图纸"——
+ * 它继承了 AbstractBD 的通用属性，并额外持有运行时缓存字段（已解析的构造器、BPP 短路标记等），
+ * 是 Bean 创建链路中不可替代的数据载体。</p>
+ *
+ * <hr/>
  * A root bean definition represents the merged bean definition that backs
  * a specific bean in a Spring BeanFactory at runtime. It might have been created
  * from multiple original bean definitions that inherit from each other,

@@ -39,6 +39,41 @@ import org.springframework.util.ObjectUtils;
 import org.springframework.util.StringUtils;
 
 /**
+ * <h1>🗺️ 一、架构坐标·全局定位</h1>
+ * <h2>BeanDefinition 接口的"骨架实现"——所有图纸实现类的公共基类！</h2>
+ * <ul>
+ * <li><b>全限定名</b>：{@code org.springframework.beans.factory.support.AbstractBeanDefinition}</li>
+ * <li><b>中文名</b>：抽象 Bean 定义 —— 图纸的"通用属性管家"</li>
+ * <li><b>所属车间 🏭</b>：{@code spring-beans} 模块的 support 包（support 包 = 骨架实现区。
+ * BeanDefinition 接口在 config 包定义契约，本类在 support 包提供骨架实现——
+ * 经典的"接口→抽象骨架→具体实现"三层分包法则）</li>
+ * <li><b>类层级</b>：实现 BeanDefinition 接口 + 继承 BeanMetadataAttributeAccessor（通用属性存取）</li>
+ * </ul>
+ *
+ * <h3>💡 核心价值——把 BeanDefinition 接口的 20+ 个属性全部实现</h3>
+ * <p>BeanDefinition 接口定义了图纸的"标准字段"（beanClassName/scope/lazyInit/primary……），
+ * 本类用成员变量 + getter/setter 把它们全部实现，子类只需关注自己的特殊性。</p>
+ *
+ * <h3>🧬 图纸家族继承体系</h3>
+ * <pre>
+ * BeanDefinition（接口：图纸标准契约）
+ * └── AbstractBeanDefinition（抽象骨架）  ← 👈 你在这里！（通用属性的完整实现）
+ *       ├── RootBeanDefinition           （终态图纸：合并后的最终版，createBean 直接使用）
+ *       ├── GenericBeanDefinition         （通用图纸：XML/注解解析产物，可指定 parent）
+ *       └── ChildBeanDefinition           （子图纸：已废弃）
+ *
+ * 带注解元信息的变体：
+ * GenericBeanDefinition
+ * ├── AnnotatedGenericBeanDefinition      （Reader 注册：ctx.register(AppConfig.class)）
+ * └── ScannedGenericBeanDefinition        （Scanner 扫描：@ComponentScan 扫到的类）
+ * </pre>
+ *
+ * <h3>🎯 战略复盘</h3>
+ * <p>AbstractBeanDefinition 的核心价值：<b>作为所有 BD 实现类的公共基类，
+ * 实现了 BeanDefinition 接口的全部通用属性（30+ 个字段），
+ * 让子类（Root/Generic/Annotated/Scanned）只需关注自己的特殊性</b>。</p>
+ *
+ * <hr/>
  * Base class for concrete, full-fledged {@link BeanDefinition} classes,
  * factoring out common properties of {@link GenericBeanDefinition},
  * {@link RootBeanDefinition}, and {@link ChildBeanDefinition}.

@@ -17,6 +17,36 @@
 package org.springframework.beans.factory;
 
 /**
+ * <h1>🗺️ 一、架构坐标·全局定位</h1>
+ * <h2>Aware 家族的"名字感知员"——让 Bean 知道自己在容器中叫什么！</h2>
+ * <ul>
+ * <li><b>全限定名</b>：{@code org.springframework.beans.factory.BeanNameAware}</li>
+ * <li><b>中文名</b>：Bean 名称感知接口 —— Bean 获取自身名字的"回调凭证"</li>
+ * <li><b>所属车间 🏭</b>：{@code spring-beans} 模块的 factory 包（factory 包 = 用户可见的工厂契约）</li>
+ * <li><b>接口层级</b>：{@code Aware} 的子接口，属于"第一批 Aware"（最先执行）</li>
+ * </ul>
+ *
+ * <h3>💡 执行时机——三兄弟中的老大</h3>
+ * <pre>
+ * invokeAwareMethods(beanName, bean)
+ * ├── 1. BeanNameAware.setBeanName()          ← 👈 你在这里！（最先）
+ * ├── 2. BeanClassLoaderAware.setBeanClassLoader()
+ * └── 3. BeanFactoryAware.setBeanFactory()
+ * </pre>
+ *
+ * <h3>💡 典型使用场景</h3>
+ * <ul>
+ * <li>日志标识：Bean 在日志中打印自己的 beanName，方便排查多实例场景</li>
+ * <li>条件逻辑：根据 beanName 走不同的初始化分支（如多数据源场景）</li>
+ * <li>框架内部：NamedBean 接口的实现依赖此回调</li>
+ * </ul>
+ *
+ * <h3>🎯 战略复盘</h3>
+ * <p>BeanNameAware 是最轻量的 Aware——只告诉 Bean 它的名字。
+ * 官方不太推荐业务代码依赖 beanName（因为这是"外部配置"，属于脆弱依赖），
+ * 但在框架内部和 SPI 扩展中它很常用。</p>
+ *
+ * <hr/>
  * Interface to be implemented by beans that want to be aware of their
  * bean name in a bean factory. Note that it is not usually recommended
  * that an object depends on its bean name, as this represents a potentially

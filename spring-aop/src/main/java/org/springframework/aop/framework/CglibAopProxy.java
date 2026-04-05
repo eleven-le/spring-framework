@@ -58,6 +58,43 @@ import org.springframework.util.ObjectUtils;
 import org.springframework.util.ReflectionUtils;
 
 /**
+ * <h1>🗺️ 一、架构坐标·全局定位</h1>
+ * <h2>CglibAopProxy —— 基于 CGLIB 字节码生成的 AOP 代理实现，能代理具体类！</h2>
+ * <ul>
+ * <li><b>全限定名</b>：{@code org.springframework.aop.framework.CglibAopProxy}</li>
+ * <li><b>中文名</b>：CGLIB AOP 代理 —— 通过 {@code Enhancer} 生成目标类的<b>子类</b>来实现代理</li>
+ * <li><b>所属车间 🏭</b>：{@code spring-aop} 模块的 {@code framework} 包
+ *     （framework 包 = AOP 代理创建/执行的核心引擎层）</li>
+ * <li><b>身份</b>：实现 {@link AopProxy}，内部使用 CGLIB {@code Enhancer} 生成代理子类</li>
+ * </ul>
+ *
+ * <h3>💡 CGLIB 代理的工作原理——"继承 + 方法拦截"</h3>
+ * <p>CGLIB 通过 ASM 字节码库在运行时<b>生成目标类的子类</b>（类名如 {@code UserService$$EnhancerBySpringCGLIB$$xxx}），
+ * 重写目标类的非 final 方法，在重写方法中调用 {@code MethodInterceptor.intercept()}。</p>
+ * <ul>
+ * <li><b>优势</b>：不需要目标类实现接口，能代理具体类的方法</li>
+ * <li><b>限制</b>：不能代理 final 类/final 方法（因为基于继承），不能代理 private 方法</li>
+ * </ul>
+ *
+ * <h3>🧬 内部 Callback 分发机制——6 种 Callback</h3>
+ * <p>CGLIB 通过 {@code CallbackFilter} 为不同方法分配不同的 Callback：</p>
+ * <ul>
+ * <li><b>DynamicAdvisedInterceptor</b>：核心！有拦截链的方法走这个，执行 proceed() 责任链</li>
+ * <li><b>StaticUnadvisedInterceptor / StaticUnadvisedExposedInterceptor</b>：无拦截链的方法，直接调用目标</li>
+ * <li><b>SerializableNoOp</b>：无需拦截的方法（如 finalize）</li>
+ * <li><b>StaticDispatcher / AdvisedDispatcher</b>：equals/hashCode/Advised 接口方法的快速分发</li>
+ * </ul>
+ *
+ * <h3>🧬 与 JdkDynamicAopProxy 的对比</h3>
+ * <table border="1" cellpadding="5" cellspacing="0">
+ * <tr><th>维度</th><th>JdkDynamicAopProxy</th><th>CglibAopProxy</th></tr>
+ * <tr><td>代理方式</td><td>接口代理（$Proxy0）</td><td>子类代理（$$EnhancerBySpringCGLIB）</td></tr>
+ * <tr><td>要求</td><td>目标必须实现接口</td><td>目标类不能是 final</td></tr>
+ * <tr><td>性能</td><td>创建快，调用稍慢（反射）</td><td>创建慢（字节码生成），调用快（MethodProxy.invoke）</td></tr>
+ * <tr><td>self-invocation</td><td>自调用不走代理</td><td>自调用同样不走代理（除非 exposeProxy=true）</td></tr>
+ * </table>
+ *
+ * <hr/>
  * CGLIB-based {@link AopProxy} implementation for the Spring AOP framework.
  *
  * <p>Objects of this type should be obtained through proxy factories,

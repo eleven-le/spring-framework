@@ -30,6 +30,47 @@ import org.springframework.lang.Nullable;
 import org.springframework.util.Assert;
 
 /**
+ * <h1>🗺️ 一、架构坐标·全局定位</h1>
+ * <h2>TransactionSynchronizationManager —— 事务的"ThreadLocal 大管家"，资源绑定 + 同步回调注册中心！</h2>
+ * <ul>
+ * <li><b>全限定名</b>：{@code org.springframework.transaction.support.TransactionSynchronizationManager}</li>
+ * <li><b>中文名</b>：事务同步管理器 —— 用 ThreadLocal 管理事务绑定的资源（Connection等）和同步回调（afterCommit等）</li>
+ * <li><b>所属车间 🏭</b>：{@code spring-tx} 模块的 {@code support} 包
+ *     （support 包 = 事务抽象的默认实现层）</li>
+ * <li><b>身份</b>：抽象工具类（全 static 方法），不可实例化——事务世界的"全局注册表"</li>
+ * </ul>
+ *
+ * <h3>💡 6 个 ThreadLocal —— 事务上下文的全部状态</h3>
+ * <table border="1" cellpadding="5" cellspacing="0">
+ * <tr><th>ThreadLocal</th><th>类型</th><th>存什么</th></tr>
+ * <tr><td>{@code resources}</td><td>Map&lt;Object, Object&gt;</td><td><b>资源绑定</b>：DataSource→ConnectionHolder, SessionFactory→SessionHolder 等</td></tr>
+ * <tr><td>{@code synchronizations}</td><td>Set&lt;TransactionSynchronization&gt;</td><td><b>同步回调列表</b>：afterCommit/afterCompletion 等</td></tr>
+ * <tr><td>{@code currentTransactionName}</td><td>String</td><td>当前事务名称（类名.方法名）</td></tr>
+ * <tr><td>{@code currentTransactionReadOnly}</td><td>Boolean</td><td>当前事务是否只读</td></tr>
+ * <tr><td>{@code currentTransactionIsolationLevel}</td><td>Integer</td><td>当前事务隔离级别</td></tr>
+ * <tr><td>{@code actualTransactionActive}</td><td>Boolean</td><td>当前是否有真正的物理事务</td></tr>
+ * </table>
+ *
+ * <h3>🧬 核心操作——资源绑定 + 同步注册</h3>
+ * <ul>
+ * <li><b>{@code bindResource(key, value)}</b>：把资源（如 ConnectionHolder）绑定到当前线程。<br/>
+ *     DataSourceTransactionManager.doBegin() 中调用，让同一线程后续的 DAO 操作拿到同一个 Connection。</li>
+ * <li><b>{@code getResource(key)}</b>：获取当前线程绑定的资源。<br/>
+ *     DataSourceUtils.getConnection() 中调用——这就是"同一事务复用同一连接"的核心机制！</li>
+ * <li><b>{@code registerSynchronization(sync)}</b>：注册事务同步回调。<br/>
+ *     @TransactionalEventListener 的底层就是注册一个 TransactionSynchronization。</li>
+ * </ul>
+ *
+ * <h3>🧬 与 REQUIRES_NEW 挂起/恢复的关系</h3>
+ * <p>当传播行为为 REQUIRES_NEW 时：</p>
+ * <pre>
+ * suspend()   → 保存当前 ThreadLocal 所有状态到 SuspendedResourcesHolder → 清空 ThreadLocal
+ * doBegin()   → 新事务的资源绑定到 ThreadLocal
+ * [执行内层方法]
+ * resume()    → 从 SuspendedResourcesHolder 恢复外层 ThreadLocal 状态
+ * </pre>
+ *
+ * <hr/>
  * Central delegate that manages resources and transaction synchronizations per thread.
  * To be used by resource management code but not by typical application code.
  *

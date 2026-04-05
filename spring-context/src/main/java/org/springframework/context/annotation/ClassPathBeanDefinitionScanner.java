@@ -36,6 +36,78 @@ import org.springframework.util.Assert;
 import org.springframework.util.PatternMatchUtils;
 
 /**
+ * <h1>🗺️ 一、架构坐标·全局定位</h1>
+ * <h2>AnnotationConfigApplicationContext 的"右臂"——包路径批量扫描的"超级雷达"！</h2>
+ * <ul>
+ * <li><b>全限定名</b>：{@code org.springframework.context.annotation.ClassPathBeanDefinitionScanner}</li>
+ * <li><b>中文名</b>：类路径 Bean 定义扫描器 —— 从包路径中批量发现 @Component 组件的"侦察兵"</li>
+ * <li><b>所属车间 🏭</b>：{@code spring-context} 模块的 annotation 包（注意！annotation 包 = 注解驱动编程模型的大本营！
+ * 本类与 AnnotatedBeanDefinitionReader（左膀）并列，是 AnnotationConfigApplicationContext 的"右臂"。
+ * 一句话：<b>Reader 负责精确注册，Scanner 负责批量扫描——两条路径互补！</b>）</li>
+ * <li><b>类层级</b>：继承 {@link ClassPathScanningCandidateComponentProvider}（候选组件发现器），
+ * 在其"发现"能力之上增加了"注册"能力</li>
+ * </ul>
+ *
+ * <h3>💡 Scanner vs Reader——"右臂"和"左膀"的分工</h3>
+ * <table border="1" cellpadding="5" cellspacing="0">
+ * <tr><th>对比维度</th><th>Scanner（本类）</th><th>Reader（AnnotatedBeanDefinitionReader）</th></tr>
+ * <tr><td>输入</td><td>包路径字符串（如 "com.example"）</td><td>具体 Class 对象</td></tr>
+ * <tr><td>发现方式</td><td>ASM 扫描 .class 文件（<b>不加载类到 JVM</b>）</td><td>需要类已加载到 JVM</td></tr>
+ * <tr><td>BD 类型</td><td>{@code ScannedGenericBeanDefinition}</td><td>{@code AnnotatedGenericBeanDefinition}</td></tr>
+ * <tr><td>过滤机制</td><td>TypeFilter（includeFilters + excludeFilters）</td><td>@Conditional</td></tr>
+ * <tr><td>使用场景</td><td>{@code ctx.scan("com.example")} / @ComponentScan</td><td>{@code ctx.register(AppConfig.class)}</td></tr>
+ * </table>
+ *
+ * <h3>🧬 扫描主链——scan() → doScan() 的核心流程</h3>
+ * <pre>
+ * scan(String... basePackages)                           ← 公开入口
+ *   └── doScan(String... basePackages)                   ← 核心扫描逻辑
+ *         └── for each basePackage:
+ *               ├── findCandidateComponents(basePackage)  ← 继承自父类！ASM 扫描 .class 文件
+ *               │     ├── 用 PathMatchingResourcePatternResolver 找到所有 .class 资源
+ *               │     ├── 用 MetadataReader（ASM）读取每个类的注解元信息
+ *               │     ├── 用 includeFilters 匹配（默认包含 @Component 及其衍生注解）
+ *               │     ├── 用 excludeFilters 排除
+ *               │     └── 返回 ScannedGenericBeanDefinition 集合
+ *               ├── 解析 @Scope → 设置 BD 的 scope + scopeProxy
+ *               ├── 生成 beanName（BeanNameGenerator）
+ *               ├── postProcessBeanDefinition()           ← 设置 BD 默认值（lazyInit/autowireMode 等）
+ *               ├── processCommonDefinitionAnnotations()  ← 解析 @Lazy/@Primary/@DependsOn/@Role
+ *               ├── checkCandidate()                      ← 检查 beanName 是否冲突
+ *               └── registerBeanDefinition()              ← 注册到 Registry！
+ * </pre>
+ *
+ * <h3>🧬 设计精髓——你的业务能偷师什么？</h3>
+ * <ol>
+ * <li><b>ASM 读取 vs 反射——性能和安全的权衡</b><br/>
+ * Scanner 使用 ASM 直接读取 .class 字节码中的注解信息，<b>不触发类加载</b>。
+ * 这避免了：① 静态代码块的副作用 ② ClassNotFoundException（依赖不全时）③ 大量类加载的内存开销。<br/>
+ * <b>业务借鉴</b>：需要扫描大量类时，优先用字节码技术而非反射。</li>
+ *
+ * <li><b>父子分层：发现 vs 注册</b><br/>
+ * 父类 ClassPathScanningCandidateComponentProvider 只负责"发现"候选组件（findCandidateComponents），
+ * 本类在其之上增加"注册"能力（doScan 中的 registerBeanDefinition）。<br/>
+ * 这使得"发现"逻辑可以被独立复用——比如 Spring Boot 的 @ConditionalOnBean 就复用了父类的扫描能力来检查类是否存在。</li>
+ *
+ * <li><b>⚠️ 高频面试考点：this.scanner vs @ComponentScan 内部 Scanner</b><br/>
+ * AnnotationConfigApplicationContext.scanner（本类实例）是给<b>编程式 ctx.scan()</b> 用的。
+ * 配置类上的 @ComponentScan 由 ConfigurationClassPostProcessor 内部<b>自己 new 一个新 Scanner</b>来处理——
+ * 两者完全是不同的实例！</li>
+ * </ol>
+ *
+ * <h3>🧬 继承体系</h3>
+ * <pre>
+ * ClassPathScanningCandidateComponentProvider（父类：发现候选组件）
+ * └── ClassPathBeanDefinitionScanner          ← 👈 你在这里！（发现 + 注册）
+ * </pre>
+ *
+ * <h3>🎯 三、战略复盘</h3>
+ * <p>ClassPathBeanDefinitionScanner 的核心价值：<b>从指定包路径出发，
+ * 用 ASM 高效扫描所有 @Component 组件，生成 ScannedGenericBeanDefinition 并注册到容器</b>。<br/>
+ * 它是 Spring 注解驱动的"右臂"——与 Reader（左膀）配合，
+ * 覆盖了"精确注册"和"批量扫描"两种 Bean 来源路径。</p>
+ *
+ * <hr/>
  * A bean definition scanner that detects bean candidates on the classpath,
  * registering corresponding bean definitions with a given registry ({@code BeanFactory}
  * or {@code ApplicationContext}).

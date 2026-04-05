@@ -22,6 +22,36 @@ import java.util.List;
 import org.springframework.util.Assert;
 
 /**
+ * <h1>🗺️ 一、架构坐标·全局定位</h1>
+ * <h2>ProxyCreatorSupport —— 三层继承链的"工厂桥"，持有 AopProxyFactory 的中间层！</h2>
+ * <ul>
+ * <li><b>全限定名</b>：{@code org.springframework.aop.framework.ProxyCreatorSupport}</li>
+ * <li><b>中文名</b>：代理创建器支撑类 —— 把"配置数据"和"代理工厂"桥接起来</li>
+ * <li><b>所属车间 🏭</b>：{@code spring-aop} 模块的 {@code framework} 包
+ *     （framework 包 = AOP 代理创建/执行的核心引擎层）</li>
+ * <li><b>类层级</b>：{@code ProxyConfig → AdvisedSupport → ProxyCreatorSupport}</li>
+ * </ul>
+ *
+ * <h3>💡 这一层的核心职责——"工厂桥"</h3>
+ * <pre>
+ * AdvisedSupport（数据仓库：Advisor列表 + TargetSource + 接口 + 方法缓存）
+ *   └── ProxyCreatorSupport ← 👈 你在这里！（工厂桥：持有 AopProxyFactory + createAopProxy()）
+ *         ├── ProxyFactory       （编程式门面）
+ *         └── ProxyFactoryBean   （XML 声明式门面）
+ * </pre>
+ * <p>这一层做的事很精准：</p>
+ * <ul>
+ * <li><b>持有 {@link AopProxyFactory}</b>（默认 {@link DefaultAopProxyFactory}）</li>
+ * <li><b>提供 {@code createAopProxy()} 方法</b>：把自身（this = AdvisedSupport 配置）传给 AopProxyFactory，
+ *     由工厂根据配置决定创建 JDK 还是 CGLIB 代理</li>
+ * <li><b>管理 {@link AdvisedSupportListener}</b>：代理首次创建时触发 activated()，Advisor 变化时触发 adviceChanged()</li>
+ * </ul>
+ *
+ * <h3>🧬 设计精髓——为什么不直接在 AdvisedSupport 里写 createAopProxy？</h3>
+ * <p><b>单一职责</b>：AdvisedSupport 只管"数据持有"，ProxyCreatorSupport 管"工厂桥接"，
+ * ProxyFactory/ProxyFactoryBean 管"对外门面"。三层各司其职，任何一层的变化不影响其他层。</p>
+ *
+ * <hr/>
  * Base class for proxy factories.
  * Provides convenient access to a configurable AopProxyFactory.
  *
