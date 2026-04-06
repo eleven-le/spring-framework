@@ -34,6 +34,38 @@ import org.springframework.util.MultiValueMap;
 import org.springframework.util.ReflectionUtils;
 
 /**
+ * <h1>🗺️ 一、架构坐标·全局定位</h1>
+ * <h2>{@link AnnotationMetadata} 的反射路径实现——"类已经加载了，直接用反射读取全部信息！"</h2>
+ * <ul>
+ * <li><b>全限定名</b>：{@code org.springframework.core.type.StandardAnnotationMetadata}</li>
+ * <li><b>中文名</b>：标准注解元数据 —— 反射路径的"全功能版"</li>
+ * <li><b>所属车间 🏭</b>：{@code spring-core} 模块的 {@code core.type} 包</li>
+ * <li><b>继承</b>：StandardClassMetadata（结构信息） + AnnotationMetadata（注解契约）</li>
+ * </ul>
+ *
+ * <h3>💡 反射路径的使用场景</h3>
+ * <p>当一个类已经被 ClassLoader 加载（你有 Class 对象）时，走这条路：</p>
+ * <ul>
+ * <li>AnnotatedBeanDefinitionReader.register(AppConfig.class) —— 手动注册配置类</li>
+ * <li>AnnotationMetadata.introspect(type) —— 静态工厂方法入口</li>
+ * <li>@Configuration 类在后续处理阶段（已加载后）的二次内省</li>
+ * </ul>
+ *
+ * <h3>🔑 核心设计：nestedAnnotationsAsMap 兼容开关</h3>
+ * <p>反射读取注解时，嵌套注解（如 @ComponentScan 里的 @Filter）默认返回的是 Annotation 实例。<br/>
+ * 但 ASM 路径返回的是 Map（因为 ASM 不加载类，无法创建 Annotation 实例）。<br/>
+ * nestedAnnotationsAsMap=true 让反射路径也返回 Map，<b>保持两条路径的行为一致</b>。</p>
+ *
+ * <h3>🧬 继承体系</h3>
+ * <pre>
+ *     ClassMetadata        AnnotatedTypeMetadata
+ *         ↓                       ↓
+ *  StandardClassMetadata   AnnotationMetadata
+ *         ↘                ↙
+ *    StandardAnnotationMetadata     ← 你在这里！反射路径的"全功能版"
+ * </pre>
+ * <hr>
+ *
  * {@link AnnotationMetadata} implementation that uses standard reflection
  * to introspect a given {@link Class}.
  *
@@ -46,15 +78,26 @@ import org.springframework.util.ReflectionUtils;
  */
 public class StandardAnnotationMetadata extends StandardClassMetadata implements AnnotationMetadata {
 
+	/** 合并注解集合——通过 MergedAnnotations.from(Class) 创建，数据源是反射 API */
 	private final MergedAnnotations mergedAnnotations;
 
+	/**
+	 * 嵌套注解是否转为 Map？
+	 * true = 返回 AnnotationAttributes（Map），与 ASM 路径一致
+	 * false = 返回原生 Annotation 实例
+	 * 5.2+ 推荐 true（通过 introspect() 工厂方法默认就是 true）
+	 */
 	private final boolean nestedAnnotationsAsMap;
 
+	/** 注解类型名缓存——懒加载，避免重复计算 */
 	@Nullable
 	private Set<String> annotationTypes;
 
 
 	/**
+	 * @deprecated 5.2 起废弃，推荐用 {@link AnnotationMetadata#introspect(Class)}
+	 * <hr>
+	 *
 	 * Create a new {@code StandardAnnotationMetadata} wrapper for the given Class.
 	 * @param introspectedClass the Class to introspect
 	 * @see #StandardAnnotationMetadata(Class, boolean)
@@ -66,6 +109,13 @@ public class StandardAnnotationMetadata extends StandardClassMetadata implements
 	}
 
 	/**
+	 * 构造方法——包装 Class 对象并创建 MergedAnnotations。
+	 * <p>SearchStrategy.INHERITED_ANNOTATIONS：搜索当前类 + 父类继承的注解（不搜索接口）。
+	 * <p>RepeatableContainers.none()：不处理可重复注解容器（如 @PropertySources）。
+	 * @param introspectedClass 要内省的类
+	 * @param nestedAnnotationsAsMap 嵌套注解是否转为 Map（推荐 true）
+	 * <hr>
+	 *
 	 * Create a new {@link StandardAnnotationMetadata} wrapper for the given Class,
 	 * providing the option to return any nested annotations or annotation arrays in the
 	 * form of {@link org.springframework.core.annotation.AnnotationAttributes} instead
@@ -89,11 +139,19 @@ public class StandardAnnotationMetadata extends StandardClassMetadata implements
 	}
 
 
+	// =====================================================================================
+	// 一、AnnotatedTypeMetadata 的核心实现——返回注解数据源
+	// =====================================================================================
+
 	@Override
 	public MergedAnnotations getAnnotations() {
 		return this.mergedAnnotations;
 	}
 
+	/**
+	 * 【缓存优化】注解类型名集合只计算一次，后续直接返回缓存。
+	 * <p>委托给父接口的 default 实现（遍历 MergedAnnotations 流），然后包装成不可变集合缓存。
+	 */
 	@Override
 	public Set<String> getAnnotationTypes() {
 		Set<String> annotationTypes = this.annotationTypes;
@@ -104,6 +162,17 @@ public class StandardAnnotationMetadata extends StandardClassMetadata implements
 		return annotationTypes;
 	}
 
+	// =====================================================================================
+	// 二、注解属性读取——根据 nestedAnnotationsAsMap 选择不同策略
+	// =====================================================================================
+
+	/**
+	 * 【策略分叉】根据 nestedAnnotationsAsMap 决定走哪条路径：
+	 * <ul>
+	 * <li>true → 走 AnnotationMetadata 接口的 default 实现（MergedAnnotations 路径，返回 Map）</li>
+	 * <li>false → 走 AnnotatedElementUtils（原生反射路径，嵌套注解返回 Annotation 实例）</li>
+	 * </ul>
+	 */
 	@Override
 	@Nullable
 	public Map<String, Object> getAnnotationAttributes(String annotationName, boolean classValuesAsString) {
@@ -114,6 +183,7 @@ public class StandardAnnotationMetadata extends StandardClassMetadata implements
 				getIntrospectedClass(), annotationName, classValuesAsString, false);
 	}
 
+	/** 同上策略分叉，批量版本 */
 	@Override
 	@Nullable
 	public MultiValueMap<String, Object> getAllAnnotationAttributes(String annotationName, boolean classValuesAsString) {
@@ -124,6 +194,15 @@ public class StandardAnnotationMetadata extends StandardClassMetadata implements
 				getIntrospectedClass(), annotationName, classValuesAsString, false);
 	}
 
+	// =====================================================================================
+	// 三、方法注解查询——反射路径的实现
+	// =====================================================================================
+
+	/**
+	 * 【快速判断是否有被注解标注的方法】
+	 * <p>优化：先用 isCandidateClass 做快速排除（如果类名/包名与注解不匹配，直接返回 false）。
+	 * <p>然后遍历 getDeclaredMethods()，找到第一个匹配就返回 true——短路求值。
+	 */
 	@Override
 	public boolean hasAnnotatedMethods(String annotationName) {
 		if (AnnotationUtils.isCandidateClass(getIntrospectedClass(), annotationName)) {
@@ -142,6 +221,11 @@ public class StandardAnnotationMetadata extends StandardClassMetadata implements
 		return false;
 	}
 
+	/**
+	 * 【获取所有被注解标注的方法元数据】
+	 * <p>遍历 getDeclaredMethods()，为每个匹配方法创建 StandardMethodMetadata 包装。
+	 * <p>过滤桥接方法（bridge）——桥接方法是编译器生成的，不是用户写的，不应该被处理。
+	 */
 	@Override
 	@SuppressWarnings("deprecation")
 	public Set<MethodMetadata> getAnnotatedMethods(String annotationName) {
@@ -154,6 +238,7 @@ public class StandardAnnotationMetadata extends StandardClassMetadata implements
 						if (annotatedMethods == null) {
 							annotatedMethods = new LinkedHashSet<>(4);
 						}
+						// 为每个匹配方法创建 StandardMethodMetadata，传递 nestedAnnotationsAsMap 保持一致
 						annotatedMethods.add(new StandardMethodMetadata(method, this.nestedAnnotationsAsMap));
 					}
 				}
@@ -166,11 +251,21 @@ public class StandardAnnotationMetadata extends StandardClassMetadata implements
 	}
 
 
+	/**
+	 * 【方法注解判断的三重过滤】
+	 * 1. 不是桥接方法（bridge method 是泛型擦除产生的，跳过）
+	 * 2. 方法上至少有一个注解（快速排除无注解方法）
+	 * 3. 通过 AnnotatedElementUtils 判断是否有指定注解（支持元注解穿透）
+	 */
 	private static boolean isAnnotatedMethod(Method method, String annotationName) {
 		return !method.isBridge() && method.getAnnotations().length > 0 &&
 				AnnotatedElementUtils.isAnnotated(method, annotationName);
 	}
 
+	/**
+	 * 【包级别工厂方法】由 AnnotationMetadata.introspect(Class) 调用。
+	 * <p>固定 nestedAnnotationsAsMap=true，保持与 ASM 路径的行为一致。
+	 */
 	static AnnotationMetadata from(Class<?> introspectedClass) {
 		return new StandardAnnotationMetadata(introspectedClass, true);
 	}

@@ -749,21 +749,19 @@ public abstract class AbstractApplicationContext extends DefaultResourceLoader
 	 */
 	@Override
 	public void refresh() throws BeansException, IllegalStateException {
-		/*
-		 * 🛡️ 门卫大爷的铁腕：全局加锁
+		/* 🛡️ 门卫大爷的铁腕：全局加锁
 		 * [工厂广播] “全厂注意，现在开始核心启动流程！期间任何人不准乱动！”
-		 * [原理解析] 防止多线程环境下，有人在工厂启动一半时试图关闭工厂或重复启动。Spring 一上来就加上了全局同步锁 (startupShutdownMonitor)，保证启动过程的绝对安全。
-		 */
+		 * [原理解析] 防止多线程环境下，有人在工厂启动一半时试图关闭工厂或重复启动。Spring 一上来就加上了全局同步锁 (startupShutdownMonitor)，保证启动过程的绝对安全。*/
 		synchronized (this.startupShutdownMonitor) {
 			StartupStep contextRefresh = this.applicationStartup.start("spring.context.refresh");
 
-/* =======================================🏗️ 阶段一：工厂奠基与打扫场地 (第 1-4 步)=======================================
- * [核心目标] 把场地腾出来，准备好最基础的工具。*/
+/* ========================================================== 🏗️ 阶段一：工厂奠基与打扫场地 (第 1-4 步)  核心目标：把场地腾出来，准备好最基础的工具=======================================*/
+
 			// 1. 打扫场地：记录工厂启动时间，检查环境变量里必须存在的属性（如数据库密码配没配）。
 			// Prepare this context for refreshing.
 			prepareRefresh();
 
-			// 2. 搬来核心仓库：极其关键！把大管家 DefaultListableBeanFactory（存图纸的底层仓库）拿出来并刷新。
+			// 2. 搬来核心仓库：极其关键！把大管家 DefaultListableBeanFactory（存图纸的底层仓库）。
 			// Tell the subclass to refresh the internal bean factory.
 			ConfigurableListableBeanFactory beanFactory = obtainFreshBeanFactory();
 
@@ -778,21 +776,23 @@ public abstract class AbstractApplicationContext extends DefaultResourceLoader
 
 				StartupStep beanPostProcess = this.applicationStartup.start("spring.context.beans.post-process");
 
-/* ======================================= 👑 阶段二：图纸大爆发！(第 5 步 —— 绝对核心 🔥)=======================================
- * [剧情高潮] 还记得我们最早挂在嘴边的【1号大将】(ConfigurationClassPostProcessor) 吗？ 它一直作为一张图纸躺在仓库里。就是在这第 5 步，它被正式唤醒了！它醒来后的第一件事，就是疯狂扫描你配置的包路径，把所有的 @Component、@Service、@Bean 全部找出来，统统扔进 doRegisterBean 流水线里！
- * [结果输出] 执行完这一步，工厂仓库里彻底堆满了所有业务 Bean 的图纸！*/
+/* ========================================================== 👑 阶段二：图纸大爆发！(第 5 步 —— 绝对核心 🔥)=======================================*/
+
+				// [剧情高潮] 还记得我们最早挂在嘴边的【1号大将】(ConfigurationClassPostProcessor) 吗？ 它一直作为一张图纸躺在仓库里。就是在这第 5 步，它被正式唤醒了！它醒来后的第一件事，就是疯狂扫描你配置的包路径，把所有的 @Component、@Service、@Bean 全部找出来，统统扔进 doRegisterBean 流水线里！
+			    // [结果输出] 执行完这一步，工厂仓库里彻底堆满了所有业务 Bean 的图纸！
 				// Invoke factory processors registered as beans in the context.
 				invokeBeanFactoryPostProcessors(beanFactory);
 
-/* ======================================= 👷‍♂️ 阶段三：招募流水线质检员 (第 6 步)=======================================
- * [剧情衔接] 图纸有了，马上要开始造对象了。但在造对象前，得先把质检员招募好。还记得【2号大将】(AutowiredAnnotationBeanPostProcessor 处理 @Autowired) 和【3号大将】(CommonAnnotationBeanPostProcessor 处理 @PostConstruct) 吗？它们在这一步被实例化，并且像守卫一样站到了流水线的两旁。
- * [注意] 这里只是“注册（站岗）”，并没有开始干活！它们在等后面真正的 Bean 实例化时扑上去。*/
+/* ========================================================== 👷‍♂️ 阶段三：招募流水线质检员 (第 6 步) ====================================================   */
+
+				// [剧情衔接] 图纸有了，马上要开始造对象了。但在造对象前，得先把质检员招募好。还记得【2号大将】(AutowiredAnnotationBeanPostProcessor 处理 @Autowired) 和【3号大将】(CommonAnnotationBeanPostProcessor 处理 @PostConstruct) 吗？它们在这一步被实例化，并且像守卫一样站到了流水线的两旁。
+				// [注意] 这里只是“注册（站岗）”，并没有开始干活！它们在等后面真正的 Bean 实例化时扑上去。
 				// Register bean processors that intercept bean creation.
 				registerBeanPostProcessors(beanFactory);
 				beanPostProcess.end();
 
-/* ======================================= 📢 阶段四：搭建厂区广播系统 (第 7-10 步)=======================================
- * [核心目标] 完善工厂的配套基础设施。*/
+/* ========================================================== 📢 阶段四：搭建厂区广播系统 (第 7-10 步) 核心目标：完善工厂的配套基础设施。======================================= */
+
 				// 7. 初始化国际化组件（让工厂能听懂多国语言）。
 				// Initialize message source for this context.
 				initMessageSource();
@@ -809,22 +809,23 @@ public abstract class AbstractApplicationContext extends DefaultResourceLoader
 				// Check for listener beans and register them.
 				registerListeners();
 
-/* ======================================= 🚀 阶段五：大规模量产！(第 11 步 —— 终极核心 🔥🔥)=======================================
- * [厂长按下总开关] 这是 Spring 源码中代码量最大、逻辑最复杂的地方！ 大管家会巡视仓库里所有非懒加载的单例图纸 (non-lazy-init singletons)，逐一投入生产。
- * 在这里，你的 UserService 会被 new 出来；站岗的【2号大将】会扑上去为它注入；UserDao (依赖注入 DI)；如果有事务注解，Spring 会在这里为它生成 CGLIB 代理对象 (AOP 动态代理)。*/
+/* ========================================================== 🚀 阶段五：大规模量产！(第 11 步 —— 终极核心 🔥🔥)=======================================*/
+
+          		// [厂长按下总开关] 这是 Spring 源码中代码量最大、逻辑最复杂的地方！ 大管家会巡视仓库里所有非懒加载的单例图纸 (non-lazy-init singletons)，逐一投入生产。
+				// 在这里，你的 UserService 会被 new 出来；站岗的【2号大将】会扑上去为它注入；UserDao (依赖注入 DI)；如果有事务注解，Spring 会在这里为它生成 CGLIB 代理对象 (AOP 动态代理)。*/
 				// Instantiate all remaining (non-lazy-init) singletons.
 				finishBeanFactoryInitialization(beanFactory);
 
-/*
- * ======================================= 🎉 尾声：剪彩开业 (第 12 步)=======================================
- * [扫尾工作] 清理无用缓存图纸，并通过大喇叭广播 ContextRefreshedEvent 事件。 告诉全天下：“Spring 容器启动成功，可以开始接收业务请求啦！”
- * 呼~ 看到这里，你是不是有一种“任督二脉被打通”的爽快感？前面我们抠了那么久的底层细节，其实全都是在为这个 refresh() 里的第 5 步和第 11 步做铺垫！*/
+/* ========================================================== 🎉 尾声：剪彩开业 (第 12 步)=======================================*/
+
+				// [扫尾工作] 清理无用缓存图纸，并通过大喇叭广播 ContextRefreshedEvent 事件。 告诉全天下：“Spring 容器启动成功，可以开始接收业务请求啦！”
+				// 呼~ 看到这里，你是不是有一种“任督二脉被打通”的爽快感？前面我们抠了那么久的底层细节，其实全都是在为这个 refresh() 里的第 5 步和第 11 步做铺垫！*/
 				// Last step: publish corresponding event.
 				finishRefresh();
 			}
 
 			catch (BeansException ex) {
-				/* 🚨 突发事故：紧急熔断与销毁。
+				/* 突发事故：紧急熔断与销毁。🚨
 				 * 如果在上述 12 步中发生任何异常（比如 Bean 循环依赖无法解决、配置报错），立即销毁已经创建出来的残次品 Bean，避免占用内存，并重置启动标识，最后向上层抛出异常。*/
 				if (logger.isWarnEnabled()) {
 					logger.warn("Exception encountered during context initialization - " +
@@ -842,7 +843,7 @@ public abstract class AbstractApplicationContext extends DefaultResourceLoader
 			}
 
 			finally {
-				/* 🧹 清扫战场：重置缓存。
+				/* 清扫战场：重置缓存。 🧹
 				 * 既然单例对象都已经造完了，图纸的反射缓存信息基本就用不上了。清空它们，释放宝贵的内存。*/
 				// Reset common introspection caches in Spring's core, since we
 				// might not ever need metadata for singleton beans anymore...
@@ -857,11 +858,19 @@ public abstract class AbstractApplicationContext extends DefaultResourceLoader
 	 * active flag as well as performing any initialization of property sources.
 	 */
 	protected void prepareRefresh() {
+/* ==================================================================== 🎬 第一幕：通电挂牌，状态预热。 核心任务：记录开工时间，切换工厂运转状态标志位。============================================ */
+
+		/* 🏗️ [原理透视] 记录系统级度量指标，常用于后续计算容器启动的总耗时。
+		 * 🔧 [车间大白话] 厂长按下开工秒表，记录超级工厂开门的精确毫秒数。*/
 		// Switch to active.
 		this.startupDate = System.currentTimeMillis();
+		/* 🏗️ [原理透视] 这里的 closed 和 active 都是 AtomicBoolean 类型，使用 CAS 保证状态切换的线程安全性，防止多个线程同时启动容器。
+         * 🔧 [车间大白话] 拨动总电闸！把“关门打烊（closed）”的牌子翻到 false，把“营业中（active）”的灯牌点亮。*/
 		this.closed.set(false);
 		this.active.set(true);
 
+		/* 🏗️ [原理透视] 标准的日志门面最佳实践，在拼接字符串前先判断日志级别，避免由于频繁拼接产生的 String 对象带来的无谓内存开销。
+         * 🔧 [车间大白话] 厂长拿起大喇叭广播：“全厂注意，本车间开始大干一场了！”（根据喇叭的音量配置，决定是喊得震天响还是轻声细语）。*/
 		if (logger.isDebugEnabled()) {
 			if (logger.isTraceEnabled()) {
 				logger.trace("Refreshing " + this);
@@ -871,23 +880,44 @@ public abstract class AbstractApplicationContext extends DefaultResourceLoader
 			}
 		}
 
+/* ==================================================================== 🎬 第二幕：环境校验，防患未然（Fail-Fast 机制） */
+
+		// 核心任务：加载外部环境属性，并确保工厂开工必须的基础物资绝对到位。
+		// 过渡： 电闸拉开了，但在真正让机器运转前，必须检查水电费交没交，这也是 Spring 极具防御性编程思维的体现。
+
+		/*  🏗️ [原理透视] 典型的【模板方法模式（Template Method）】。父类中为空实现，留给子类（如 ServletWebServerApplicationContext）去加载特定的环境参数。
+         *  🔧 [车间大白话] 厂长对各分厂说：“你们各自车间有什么必须提前贴到公告板上的规章制度（Web参数等），现在赶紧贴出来。”*/
 		// Initialize any placeholder property sources in the context environment.
 		initPropertySources();
 
+		/*  🏗️ [原理透视] 极度重要的【Fail-Fast（快速失败）】机制。在后续繁重的 Bean 实例化之前，先校验必需的 property 是否存在，缺失直接抛出 MissingRequiredPropertiesException 终止启动。
+         *  🔧 [车间大白话] 消防安监处入场：核对水电账单、气压表等“核心硬性指标”。如果发现缺项，立马拉闸报警（抛异常），绝不允许工厂带着隐患开工造机器！*/
 		// Validate that all properties marked as required are resolvable:
 		// see ConfigurablePropertyResolver#setRequiredProperties
 		getEnvironment().validateRequiredProperties();
 
+/* ==================================================================== 🎬 第三幕：保护第一批情报观察员 */
+
+		//  核心任务：妥善安放那些在工厂还没建好时，就跑来登记的监听器和事件。
+		//  过渡： 环境确认安全了，接着要处理那些一大早就等在厂房门口的“早鸟”访客。
+
+
 		// Store pre-refresh ApplicationListeners...
+		// 🏗️ [原理透视] 状态备忘录设计。ApplicationContext 是可以多次调用 refresh() 的。这里为了防止多次刷新导致 earlyApplicationListeners 丢失，做了一次深拷贝隔离。
+		// 🔧 [车间大白话] 整理“开业典礼”的 VIP 宾客名单。如果是工厂建成后第一次开工（null），把提前来等候的宾客（Listener）名单备份一份；
 		if (this.earlyApplicationListeners == null) {
 			this.earlyApplicationListeners = new LinkedHashSet<>(this.applicationListeners);
 		}
 		else {
+			// 🏗️ [原理透视] 如果是容器被重新刷新（热重启），需要清空运行期间动态添加的 Listeners，恢复到最干净的原始初始状态。
+			// 🔧 [车间大白话] 如果是厂房翻新（二次开工），就把上一任期乱七八糟的旁听人员全清空，把名单精准恢复到第一次开工前的纯洁状态。
 			// Reset local application listeners to pre-refresh state.
 			this.applicationListeners.clear();
 			this.applicationListeners.addAll(this.earlyApplicationListeners);
 		}
 
+		// 🏗️ [原理透视] 事件缓冲池（Event Buffer）。在这一步，Spring 的事件广播器（EventMulticaster）还没初始化好。任何在此阶段发布的 Event 都会被塞进这个暂存集合，等待第 8 步广播器造好后再一起发射。
+		// 🔧 [车间大白话] 准备一个“早期情报收集箱”。现在厂里的中央广播站还没建好，所有刚刚发生的早鸟新闻（Event），先统统锁进这个盒子里，等后面大喇叭通电了，再一起宣发！
 		// Allow for the collection of early ApplicationEvents,
 		// to be published once the multicaster is available...
 		this.earlyApplicationEvents = new LinkedHashSet<>();
@@ -957,12 +987,12 @@ public abstract class AbstractApplicationContext extends DefaultResourceLoader
 	 * @see #getBeanFactory()
 	 */
 	protected ConfigurableListableBeanFactory obtainFreshBeanFactory() {
-		/* 1. 刷新/校验底层工厂 (触发多态逻辑)
+		/* 刷新/校验底层工厂 (触发多态逻辑)
 		 * [核心动作] 执行真正的“刷新或校验”工厂逻辑。
 		 * [原理解析] 这里会触发上述的“双重人格”逻辑。对于当前的现代注解派， 仅仅是执行防重复刷新校验，并为工厂打上序列化 ID 标签。*/
 		refreshBeanFactory();
 
-		/* 2. 移交大管家钥匙
+		/* 移交大管家钥匙
 		 * [核心动作] 把准备好的大管家 (DefaultListableBeanFactory) 暴露返回。
 		 * [原理解析] 返回给外层 refresh() 方法，让后面的 10 个核心步骤都能拿着这把钥匙（工厂实例引用）去干活。*/
 		return getBeanFactory();

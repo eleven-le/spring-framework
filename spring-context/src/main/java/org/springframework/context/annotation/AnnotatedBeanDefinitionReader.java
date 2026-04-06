@@ -363,40 +363,30 @@ public class AnnotatedBeanDefinitionReader {
 	private <T> void doRegisterBean(Class<T> beanClass, @Nullable String name,
 			@Nullable Class<? extends Annotation>[] qualifiers, @Nullable Supplier<T> supplier,
 			@Nullable BeanDefinitionCustomizer[] customizers) {
-		/*
-		 * 🎬 1. X光扫描与安检门 (图纸初始化与条件拦截)
+		/* 🎬  X光扫描与安检门 (图纸初始化与条件拦截)
 		 * [扫描建模] 机器先用反射技术对 beanClass 进行 360 度扫描，转化为名为  AnnotatedGenericBeanDefinition 的数字化图纸，保留类上所有的注解信息。
-		 * [无情安检] 图纸来到 conditionEvaluator（条件评估器）面前，安检员死死盯住 @Conditional 等条件注解（比如 @ConditionalOnMissingBean）。 如果不符合条件？警报拉响，直接 return，图纸当场销毁，提前下班！
-		 */
+		 * [无情安检] 图纸来到 conditionEvaluator（条件评估器）面前，安检员死死盯住 @Conditional 等条件注解（比如 @ConditionalOnMissingBean）。 如果不符合条件？警报拉响，直接 return，图纸当场销毁，提前下班！ */
 		AnnotatedGenericBeanDefinition abd = new AnnotatedGenericBeanDefinition(beanClass);
 		if (this.conditionEvaluator.shouldSkip(abd.getMetadata())) {
 			return;
 		}
-		/*
-		 * 🎬 2. 挂载 3D 打印机 (绑定实例提供者)
-		 * [高级装配] 如果你在进料口递交了高级的 Supplier（入参 4），机器就会在这里把它组装到图纸上。彻底规避后续繁琐的反射实例化过程。
-		 */
+		/* 🎬  挂载 3D 打印机 (绑定实例提供者)
+		 * [高级装配] 如果你在进料口递交了高级的 Supplier（入参 4），机器就会在这里把它组装到图纸上。彻底规避后续繁琐的反射实例化过程。 */
 		abd.setInstanceSupplier(supplier);
-		/*
-		 * 🎬 3. 分配宿舍与印制身份证 (解析作用域与生成 BeanName)
+
+		/* 🎬 分配宿舍与印制身份证 (解析作用域与生成 BeanName)
 		 * [查户口 Scope] 车间主任读取 @Scope 注解，决定这个 Bean它是住“全局单例豪华套房”（singleton） 还是“每次新建的快捷酒店”（prototype）。
-		 * [发证件 Name] 如果入参没给名字，自带的 beanNameGenerator 就会生成一个默认名字 （通常是类名首字母小写）。
-		 */
+		 * [发证件 Name] 如果入参没给名字，自带的 beanNameGenerator 就会生成一个默认名字 （通常是类名首字母小写）。*/
 		ScopeMetadata scopeMetadata = this.scopeMetadataResolver.resolveScopeMetadata(abd);
 		abd.setScope(scopeMetadata.getScopeName());
 		String beanName = (name != null ? name : this.beanNameGenerator.generateBeanName(abd, this.registry));
-		/*
-		 * 🎬 4. 全自动“纹身”识别 (处理通用注解)
-		 * [精密盖章] 识别仪自动读取代码里的通用注解，并给图纸盖章：
-		 * ① 看到 @Lazy ➡️ 盖上“不着急，延后处理”章。
-		 * ② 看到 @Primary ➡️ 盖上“VIP 优先注入”章。
-		 * ③ 看到 @DependsOn ➡️ 写上“必须先实例化某某”。
-		 */
+
+		/* 🎬 全自动“纹身”识别 (处理通用注解)  [精密盖章] 识别仪自动读取代码里的通用注解，并给图纸盖章：
+		 * ① 看到 @Lazy ➡️ 盖上“不着急，延后处理”章。 ② 看到 @Primary ➡️ 盖上“VIP 优先注入”章。③ 看到 @DependsOn ➡️ 写上“必须先实例化某某”。 */
 		AnnotationConfigUtils.processCommonDefinitionAnnotations(abd);
-		/*
-		 * 🎬 5. 人工特权干预 (处理便利贴与特派员)
-		 * [极致扩展] 流水线在此暂停！开始处理入参 3 和入参 5。把你强行加的额外属性（qualifiers）以及特派员的涂改逻辑（customizers）全部融合进图纸里， 完美展现了 Spring 底层极高的可定制性。
-		 */
+
+		/* 🎬 人工特权干预 (处理便利贴与特派员)
+		 * [极致扩展] 流水线在此暂停！开始处理入参 3 和入参 5。把你强行加的额外属性（qualifiers）以及特派员的涂改逻辑（customizers）全部融合进图纸里， 完美展现了 Spring 底层极高的可定制性。*/
 		if (qualifiers != null) {
 			for (Class<? extends Annotation> qualifier : qualifiers) {
 				if (Primary.class == qualifier) {
@@ -415,14 +405,13 @@ public class AnnotatedBeanDefinitionReader {
 				customizer.customize(abd);
 			}
 		}
-		/*
-		 * 🎬 6. 打包装箱，正式入库！ (注册到大管家)
-		 * [打包装箱] 图纸画好了！拿来 BeanDefinitionHolder 纸箱，把图纸和名字一起装进去。
-		 * [防呆设计] 如果发现这是 Web 专属的 Request 作用域图纸，为防被单例对象错误引用，车间会施展魔法，给你套一个 CGLIB 代理的“保护壳”(ScopedProxyMode)。
-		 * [入库上锁] 最后一步，纸箱被正式搬进大管家 (registry) 的恒温仓库 (底层的 ConcurrentHashMap) 中。大功告成！
-		 */
+
+		/* 🎬 打包装箱，正式入库！ (注册到大管家)
+		 * [打包装箱] 图纸画好了！拿来 BeanDefinitionHolder 纸箱，把图纸和名字一起装进去。*/
 		BeanDefinitionHolder definitionHolder = new BeanDefinitionHolder(abd, beanName);
+		// [防呆设计] 如果发现这是 Web 专属的 Request 作用域图纸，为防被单例对象错误引用，车间会施展魔法，给你套一个 CGLIB 代理的“保护壳”(ScopedProxyMode)。
 		definitionHolder = AnnotationConfigUtils.applyScopedProxyMode(scopeMetadata, definitionHolder, this.registry);
+		// [入库上锁] 最后一步，纸箱被正式搬进大管家 (registry) 的恒温仓库 (底层的 ConcurrentHashMap) 中。大功告成！
 		BeanDefinitionReaderUtils.registerBeanDefinition(definitionHolder, this.registry);
 	}
 

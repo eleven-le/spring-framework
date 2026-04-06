@@ -258,26 +258,19 @@ public class AnnotationConfigApplicationContext extends GenericApplicationContex
 	 * {@link Configuration @Configuration} classes
 	 */
 	public AnnotationConfigApplicationContext(Class<?>... componentClasses) {
-		/*
-		 * 1. 环境准备 (初始化基础组件)
-		 * [核心动作] 调用无参构造函数 this()。
-		 * [原理解析] 在这里，Spring 默默完成了两项核心工作： 一是创建了专门读取注解的  Reader 和扫描包的 Scanner；二是向容器中注册了维持框架运转的基础设施 Bean （如处理 @Configuration 和 @Autowired 的内部后置处理器）。
-		 * [形象比喻] 相当于在建筑工地正式开工前，先把“包工头”和“重型机械”安排进场。
-		 */
+		/* 环境准备 (初始化基础组件)
+		 * [原理解析] 在这里，Spring 默默完成了两项核心工作： 1. 是创建了专门读取注解的Reader和扫描包的Scanner；2. 是向容器中注册了维持框架运转的基础设施 Bean （如处理 @Configuration 和 @Autowired 的内部后置处理器）。
+		 * [形象比喻] 相当于在建筑工地正式开工前，先把“包工头”和“重型机械”安排进场。*/
 		this();
-		/*
-		 * 2. 注册主配置类 (图纸入库)
-		 * [核心动作] 将传入的配置类（例如 AppConfig.class）解析为 BeanDefinition。
-		 * [原理解析] Spring 容器目前虽然有了基础组件，但还不知道业务逻辑在哪里。 这一步就是把主配置类注册进大管家的仓库（DefaultListableBeanFactory）中。
-		 * [形象比喻] 这个配置类就像是一张“总设计图纸”，它指引着 Spring 接下来去哪里 寻找其他的业务 Bean（比如通过 @ComponentScan 指示的扫描路径）。
-		 */
+
+		/* 注册主配置类 (图纸入库)，将传入的配置类（例如 AppConfig.class）解析为 BeanDefinition。
+		 * [原理解析] Spring 容器目前虽然有了基础组件，但还不知道业务逻辑在哪里。这一步就是把主配置类注册进大管家的仓库（DefaultListableBeanFactory）中。
+		 * [形象比喻] 这个配置类就像是一张“总设计图纸”，它指引着 Spring 接下来去哪里 寻找其他的业务 Bean（比如通过 @ComponentScan 指示的扫描路径）。*/
 		register(componentClasses);
-		/*
-		 * 3. 刷新与启动容器 (万物生长的引擎)
-		 * [核心动作] 执行 Spring 源码中最核心、最复杂、也最重要的方法 —— refresh()。
-		 * [原理解析] 之前的步骤都只是在做“纸上谈兵”（处理 BeanDefinition 图纸）。 只有调用了 refresh()，Spring 才会真正开始根据图纸去实例化所有的单例 Bean，完成依赖注入（DI），并织入切面逻辑（AOP）等高级功能。
-		 * [高能预警] 这是整个 Spring 框架的“心脏跳动”时刻。只要彻底掌握了 refresh() 内部的执行主干，Spring 的底层原理基本就通透了！
-		 */
+
+		/* 刷新与启动容器 (万物生长的引擎)
+		 * [原理解析] 之前的步骤都只是在做“纸上谈兵”（处理 BeanDefinition 图纸）。只有调用了 refresh()，Spring 才会真正开始根据图纸去实例化所有的单例 Bean，完成依赖注入（DI），并织入切面逻辑（AOP）等高级功能。
+		 * [高能预警] 这是整个 Spring 框架的“心脏跳动”时刻。只要彻底掌握了 refresh() 内部的执行主干，Spring 的底层原理基本就通透了！*/
 		refresh();
 	}
 
@@ -419,28 +412,19 @@ public class AnnotationConfigApplicationContext extends GenericApplicationContex
 	 */
 	@Override
 	public void register(Class<?>... componentClasses) {
-		/*
-		 * 1. 防御性编程：断言校验 (Fail-Fast)
-		 * [原理解析] Assert 是 Spring 提供的内部断言工具类。在正式执行逻辑前， 先严格检查传入的 componentClasses (如 AppConfig.class) 是否为空。
-		 * [设计意图] 如果为空，立刻抛出 IllegalArgumentException。这是一种经典的快速失败 (Fail-Fast) 机制，防止程序带着错误或非法的状态继续向下执行， 从而避免在后续链路中引发更难排查的 Bug。
-		 */
 		Assert.notEmpty(componentClasses, "At least one component class must be specified");
 
-		/*
-		 * 2. 性能监控追踪 (Spring 5.3 核心新特性 ✨)
+		/* 性能监控追踪 (Spring 5.3 核心新特性 ✨)
 		 * [背景知识] StartupStep 是 Spring 5.3 引入的 Application Startup 启动追踪机制。随着微服务架构的普及，开发者对 Spring Boot / Spring 的启动速度要求越来越苛刻。
-		 * [设计意图] 这段代码相当于给 Spring 的启动过程装上了“秒表”。它精准记录了“注册配置类”这一步的耗时，并打上 tag 标签。配合 Java Flight Recorder (JFR) 等工具，能够实现对启动性能瓶颈的毫秒级剖析。
-		 */
+		 * [设计意图] 这段代码相当于给 Spring 的启动过程装上了“秒表”。它精准记录了“注册配置类”这一步的耗时，并打上 tag 标签。配合 Java Flight Recorder (JFR) 等工具，能够实现对启动性能瓶颈的毫秒级剖析。*/
 		StartupStep registerComponentClass = getApplicationStartup().start("spring.context.component-classes.register")
 				.tag("classes", () -> Arrays.toString(componentClasses));
 
-		/*
-		 * 3. 核心动作：委托“左膀”接管解析
+		/* 核心动作：委托“左膀”接管解析
 		 * [原理解析] 这是本方法中唯一真正执行业务逻辑的代码！AnnotationConfigApplicationContext 作为一个庞大的外观上下文，并不亲自解析配置类。它把这个复杂的脏活累活，委托 (Delegate)  给了它的“左膀” —— this.reader (AnnotatedBeanDefinitionReader)。
-		 * [串联上下文] 还记得我们最开始研究的那几位“核心大将”吗？当 this.reader 被实例化的那一刻，Spring 就悄悄调用了底层的注册方法， 把那些“核心基础设施图纸”塞进了大管家的仓库里。现在，环境准备完毕，终于轮到 Reader 来接管并解析我们传入的业务配置类了。
-		 */
+		 * [串联上下文] 还记得我们最开始研究的那几位“核心大将”吗？当 this.reader 被实例化的那一刻，Spring 就悄悄调用了底层的注册方法， 把那些“核心基础设施图纸”塞进了大管家的仓库里。现在，环境准备完毕，终于轮到 Reader 来接管并解析我们传入的业务配置类了。*/
 		this.reader.register(componentClasses);
-		// 结束性能监控的“秒表”计时
+
 		registerComponentClass.end();
 	}
 

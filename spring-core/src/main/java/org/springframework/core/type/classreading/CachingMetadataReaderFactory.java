@@ -27,6 +27,35 @@ import org.springframework.core.io.ResourceLoader;
 import org.springframework.lang.Nullable;
 
 /**
+ * <h1>🗺️ 架构坐标</h1>
+ * <h2>带缓存的 MetadataReaderFactory——同一个 .class 文件只解析一次！</h2>
+ * <ul>
+ * <li><b>全限定名</b>：{@code org.springframework.core.type.classreading.CachingMetadataReaderFactory}</li>
+ * <li><b>中文名</b>：缓存元数据读取器工厂 —— "解析结果仓库"</li>
+ * <li><b>所属车间 🏭</b>：{@code spring-core} 模块的 {@code core.type.classreading} 包</li>
+ * <li><b>命名法则</b>：Caching 前缀 = 在父类基础上加了缓存层（装饰器思想）</li>
+ * </ul>
+ *
+ * <h3>💡 为什么需要缓存？</h3>
+ * <p>Spring 启动扫描时，同一个 .class 文件可能被多次读取：</p>
+ * <ul>
+ * <li>@ComponentScan 扫描时读一次</li>
+ * <li>@Import 处理时可能再读一次</li>
+ * <li>@Conditional 评估时可能又读一次</li>
+ * </ul>
+ * <p>每次读取都要打开文件→ASM解析→创建对象，开销不小。缓存后只解析一次，后续直接返回。</p>
+ *
+ * <h3>🔑 两种缓存模式</h3>
+ * <ul>
+ * <li><b>本地缓存（LocalResourceCache）</b>：LRU LinkedHashMap，默认上限 256 条。
+ *     用于独立的 MetadataReaderFactory 实例。</li>
+ * <li><b>共享缓存（ConcurrentMap）</b>：当 ResourceLoader 是 DefaultResourceLoader 时，
+ *     使用 ResourceLoader 级别的共享缓存（无大小限制）。多个工厂共享同一份缓存。</li>
+ * </ul>
+ * <p><b>生产环境</b>：ApplicationContext 内部使用的 MetadataReaderFactory 默认就是
+ * CachingMetadataReaderFactory + 共享缓存模式。</p>
+ * <hr>
+ *
  * Caching implementation of the {@link MetadataReaderFactory} interface,
  * caching a {@link MetadataReader} instance per Spring {@link Resource} handle
  * (i.e. per ".class" file).
@@ -37,9 +66,15 @@ import org.springframework.lang.Nullable;
  */
 public class CachingMetadataReaderFactory extends SimpleMetadataReaderFactory {
 
+	/** 本地缓存默认上限：256 条。超过后 LRU 淘汰最久未使用的条目。 */
 	/** Default maximum number of entries for a local MetadataReader cache: 256. */
 	public static final int DEFAULT_CACHE_LIMIT = 256;
 
+	/**
+	 * 缓存 Map：Resource → MetadataReader。
+	 * 可能是 LocalResourceCache（本地 LRU）或 ConcurrentMap（共享缓存）。
+	 * null 表示无缓存。
+	 */
 	/** MetadataReader cache: either local or shared at the ResourceLoader level. */
 	@Nullable
 	private Map<Resource, MetadataReader> metadataReaderCache;
@@ -114,10 +149,19 @@ public class CachingMetadataReaderFactory extends SimpleMetadataReaderFactory {
 	}
 
 
+	/**
+	 * 【带缓存的 getMetadataReader】——核心方法，覆写父类。
+	 * <p>三种策略：
+	 * <ol>
+	 * <li>ConcurrentMap（共享缓存）→ 无需同步，直接 get/put</li>
+	 * <li>LocalResourceCache（本地 LRU）→ synchronized 保护</li>
+	 * <li>null（无缓存）→ 退化为父类行为（每次新建）</li>
+	 * </ol>
+	 */
 	@Override
 	public MetadataReader getMetadataReader(Resource resource) throws IOException {
 		if (this.metadataReaderCache instanceof ConcurrentMap) {
-			// No synchronization necessary...
+			// 共享缓存（ConcurrentMap）——线程安全，无需同步
 			MetadataReader metadataReader = this.metadataReaderCache.get(resource);
 			if (metadataReader == null) {
 				metadataReader = super.getMetadataReader(resource);
@@ -126,6 +170,7 @@ public class CachingMetadataReaderFactory extends SimpleMetadataReaderFactory {
 			return metadataReader;
 		}
 		else if (this.metadataReaderCache != null) {
+			// 本地缓存（LocalResourceCache = LinkedHashMap）——非线程安全，需要 synchronized
 			synchronized (this.metadataReaderCache) {
 				MetadataReader metadataReader = this.metadataReaderCache.get(resource);
 				if (metadataReader == null) {
@@ -136,6 +181,7 @@ public class CachingMetadataReaderFactory extends SimpleMetadataReaderFactory {
 			}
 		}
 		else {
+			// 无缓存——退化为父类行为
 			return super.getMetadataReader(resource);
 		}
 	}
