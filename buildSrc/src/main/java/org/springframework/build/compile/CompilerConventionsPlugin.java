@@ -50,8 +50,10 @@ public class CompilerConventionsPlugin implements Plugin<Project> {
 		COMPILER_ARGS = new ArrayList<>();
 		COMPILER_ARGS.addAll(commonCompilerArgs);
 		COMPILER_ARGS.addAll(Arrays.asList(
-				"-Xlint:varargs", "-Xlint:fallthrough", "-Xlint:rawtypes", "-Xlint:deprecation",
-				"-Xlint:unchecked", "-Werror"
+				// 学习分支：去掉 -Werror、关闭 deprecation 告警，使 JDK 11 可执行 publishToMavenLocal
+				// （JDK 11 将 isAccessible() 等标记为 deprecated，官方 -Werror 会把告警升级为编译失败）
+				"-Xlint:varargs", "-Xlint:fallthrough", "-Xlint:rawtypes", "-Xlint:-deprecation",
+				"-Xlint:unchecked"
 		));
 		TEST_COMPILER_ARGS = new ArrayList<>();
 		TEST_COMPILER_ARGS.addAll(commonCompilerArgs);

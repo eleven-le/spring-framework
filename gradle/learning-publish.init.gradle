@@ -1,0 +1,8 @@
+// 学习分支专用 init 脚本：publishToMavenLocal 时跳过 javadoc 失败
+// （JDK 11 javadoc 将跨模块 @see/@link 引用告警判为失败，与学习目的无关）
+// 用法：./gradlew -I gradle/learning-publish.init.gradle :spring-context:publishToMavenLocal ...
+allprojects {
+    tasks.withType(Javadoc).configureEach {
+        failOnError = false
+    }
+}
