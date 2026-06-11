@@ -36,6 +36,9 @@ include "spring-websocket"
 include "framework-bom"
 include "integration-tests"
 
+// 学习分支：Spring 军火库实验工程（project 依赖直连源码，断点/改码即时生效）
+include "springsource-laboratory"
+
 rootProject.name = "spring"
 rootProject.children.each {project ->
 	project.buildFileName = "${project.name}.gradle"

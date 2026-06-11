@@ -1,0 +1,32 @@
+// 学习分支专属模块：Spring 军火库实验工程（非 Spring 官方构建的一部分）。
+// 业务锚点：茶饮 C 端产品中心（商品/SKU/价格/库存/订单），对照 Obsidian「框架/Spring」军火库章节。
+// 直连源码模块（project 依赖）：断点直达本仓库源码，修改 Spring 源码无需任何发布动作即时生效。
+// ⚠️ 整库构建需 JDK 11（Oracle JDK 8 缺 jdk.jfr，spring-core 编不过）；本模块产物仍是 1.8 语言级。
+description = "springsource-laboratory：Spring 5.3.39 源码学习实验工程（茶饮 C 端高并发场景）"
+group = "com.leilei.lab"
+
+// 实验代码不受 Spring 仓库 javaformat/checkstyle 格式约束
+tasks.withType(Checkstyle).configureEach {
+	enabled = false
+}
+
+dependencies {
+	implementation(project(":spring-context"))
+	implementation(project(":spring-aop"))
+	implementation(project(":spring-tx"))
+	implementation(project(":spring-jdbc"))
+	implementation(project(":spring-webmvc"))
+
+	implementation("org.aspectj:aspectjweaver")               // 1.9.7，版本由根工程 dependencyManagement 仲裁
+	implementation("org.slf4j:slf4j-api")                     // 1.7.36，同上
+	implementation("ch.qos.logback:logback-classic:1.2.13")   // JDK 8 兼容的最后主线
+	compileOnly("javax.servlet:javax.servlet-api:4.0.1")
+
+	testImplementation(project(":spring-test"))
+	// junit-jupiter / mockito / assertj 已由根 build.gradle 的 javaProjects 块统一注入
+}
+
+// 测试类路径排除根工程注入的 log4j 绑定，避免与 logback 形成双 SLF4J 绑定
+configurations.testRuntimeClasspath {
+	exclude group: "org.apache.logging.log4j", module: "log4j-slf4j-impl"
+}
