@@ -1,8 +1,13 @@
 /**
  * 📖 对应章节：[[L03-01-代理机制与选型-JDK与CGLIB]]
- * 🎯 本包主题：L03-01 代理机制与选型-JDK与CGLIB
- * ⬜ Phase 0 占位：装弹时填充示例类，命名 L0301_01_XxxYyy（序号 = 阅读顺序），
- *    场景取自茶饮 C 端高并发（商品上下架 / 价格匹配 / 库存扣减 / 秒杀 / 缓存击穿…），
- *    复用 com.leilei.lab.laboratory.common 基建，🚫 禁止 hello-world。
+ * 🎯 本包主题：L03-01 代理机制与选型——JDK 动态代理 vs CGLIB 取舍、proxyTargetClass / exposeProxy / AopContext、
+ *    以及 CGLIB 子类代理的 final/private 硬约束。
+ * 📦 核心类（阅读顺序 = 类序号）：
+ *    - {@link com.leilei.lab.laboratory.l03.l03_01.L0301_01_JdkVsCglibProxySelectionDemo}
+ *      —— DefaultAopProxyFactory 三条选型规则：有接口走 JDK / 无接口走 CGLIB / proxyTargetClass 强制 CGLIB。
+ *    - {@link com.leilei.lab.laboratory.l03.l03_01.L0301_02_ExposeProxySelfInvocationDemo}
+ *      —— 自调用绕过代理导致切面失效，exposeProxy + AopContext.currentProxy() 逃生门（秒杀扣库存）。
+ *    - {@link com.leilei.lab.laboratory.l03.l03_01.L0301_03_CglibFinalMethodConstraintDemo}
+ *      —— CGLIB 子类代理无法覆写 final/private 方法，挂其上的切面静默失效（上下架操作日志）。
  */
 package com.leilei.lab.laboratory.l03.l03_01;
